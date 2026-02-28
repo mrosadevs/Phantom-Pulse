@@ -1,0 +1,192 @@
+import { IpcMain } from 'electron'
+import { execSync } from 'child_process'
+import { QBConnection } from '../qb/connection'
+import { buildQBXMLRequest, parseQBXMLResponse } from '../qb/qbxml'
+import { importTransactions } from '../qb/importer'
+import { exportTransactions } from '../qb/exporter'
+
+const qbConnection = new QBConnection()
+
+export function registerQBHandlers(ipcMain: IpcMain): void {
+  // Connect to QuickBooks Desktop
+  ipcMain.handle('qb:connect', async (_, companyFile?: string) => {
+    try {
+      const result = await qbConnection.connect(companyFile)
+      return result
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Disconnect
+  ipcMain.handle('qb:disconnect', async () => {
+    try {
+      qbConnection.disconnect()
+      return { success: true }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Get connection status
+  ipcMain.handle('qb:status', async () => {
+    return qbConnection.getStatus()
+  })
+
+  // Raw QBXML query
+  ipcMain.handle('qb:query', async (_, request: string) => {
+    try {
+      const response = await qbConnection.sendRequest(request)
+      return { success: true, data: response }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Import transactions into QuickBooks Desktop
+  ipcMain.handle(
+    'qb:importTransactions',
+    async (_, transactions: Record<string, string>[], type: string) => {
+      try {
+        if (!qbConnection.isConnected()) {
+          return { success: false, error: 'Not connected to QuickBooks Desktop' }
+        }
+        const results = await importTransactions(qbConnection, transactions, type)
+        return { success: true, results }
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  // Export transactions from QuickBooks Desktop
+  ipcMain.handle('qb:exportTransactions', async (_, type: string, filters: unknown) => {
+    try {
+      if (!qbConnection.isConnected()) {
+        return { success: false, error: 'Not connected to QuickBooks Desktop' }
+      }
+      const data = await exportTransactions(qbConnection, type, filters as Record<string, string>)
+      return { success: true, data }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Delete transactions
+  ipcMain.handle('qb:deleteTransactions', async (_, txnIds: string[], txnType: string) => {
+    try {
+      if (!qbConnection.isConnected()) {
+        return { success: false, error: 'Not connected to QuickBooks Desktop' }
+      }
+
+      const results: { txnId: string; success: boolean; error?: string }[] = []
+      for (const txnId of txnIds) {
+        try {
+          const xml = buildQBXMLRequest('TxnDelRq', { TxnDelType: txnType, TxnID: txnId })
+          const response = await qbConnection.sendRequest(xml)
+          const parsed = parseQBXMLResponse(response)
+          results.push({
+            txnId,
+            success: parsed.statusCode === '0',
+            error: parsed.statusCode !== '0' ? parsed.statusMessage : undefined
+          })
+        } catch (e: unknown) {
+          results.push({ txnId, success: false, error: e instanceof Error ? e.message : String(e) })
+        }
+      }
+      return { success: true, results }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Get company info
+  ipcMain.handle('qb:getCompanyInfo', async () => {
+    try {
+      if (!qbConnection.isConnected()) return { success: false, error: 'Not connected' }
+      const xml = buildQBXMLRequest('CompanyQueryRq', {})
+      const response = await qbConnection.sendRequest(xml)
+      return { success: true, data: parseQBXMLResponse(response) }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Get chart of accounts
+  ipcMain.handle('qb:getAccounts', async () => {
+    try {
+      if (!qbConnection.isConnected()) return { success: false, data: [] }
+      const xml = buildQBXMLRequest('AccountQueryRq', {})
+      const response = await qbConnection.sendRequest(xml)
+      const parsed = parseQBXMLResponse(response)
+      return { success: true, data: parsed.list || [] }
+    } catch (err: unknown) {
+      return { success: false, data: [], error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Get customers
+  ipcMain.handle('qb:getCustomers', async () => {
+    try {
+      if (!qbConnection.isConnected()) return { success: false, data: [] }
+      const xml = buildQBXMLRequest('CustomerQueryRq', {})
+      const response = await qbConnection.sendRequest(xml)
+      const parsed = parseQBXMLResponse(response)
+      return { success: true, data: parsed.list || [] }
+    } catch (err: unknown) {
+      return { success: false, data: [], error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Get vendors
+  ipcMain.handle('qb:getVendors', async () => {
+    try {
+      if (!qbConnection.isConnected()) return { success: false, data: [] }
+      const xml = buildQBXMLRequest('VendorQueryRq', {})
+      const response = await qbConnection.sendRequest(xml)
+      const parsed = parseQBXMLResponse(response)
+      return { success: true, data: parsed.list || [] }
+    } catch (err: unknown) {
+      return { success: false, data: [], error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Get items
+  ipcMain.handle('qb:getItems', async () => {
+    try {
+      if (!qbConnection.isConnected()) return { success: false, data: [] }
+      const xml = buildQBXMLRequest('ItemQueryRq', {})
+      const response = await qbConnection.sendRequest(xml)
+      const parsed = parseQBXMLResponse(response)
+      return { success: true, data: parsed.list || [] }
+    } catch (err: unknown) {
+      return { success: false, data: [], error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Auto-detect QB company file path from the running QB process
+  ipcMain.handle('qb:detectCompanyFile', async () => {
+    try {
+      // Query WMI for QB process command line — it contains the .qbw path
+      const ps = `powershell -NoProfile -Command "Get-WmiObject Win32_Process | Where-Object { $_.Name -like 'qbw*' -or $_.Name -like 'QBW*' } | Select-Object -ExpandProperty CommandLine"`
+      const output = execSync(ps, { timeout: 8000 }).toString().trim()
+
+      // Extract .qbw path from the command line string
+      const match = output.match(/"?([^"]+\.qbw)"?/i)
+      if (match?.[1]) {
+        return { success: true, path: match[1] }
+      }
+
+      // Fallback: check QB recent files in registry
+      const reg = `powershell -NoProfile -Command "Get-ItemProperty 'HKCU:\\Software\\Intuit\\QuickBooks' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LastOpenFile 2>$null"`
+      const regOut = execSync(reg, { timeout: 5000 }).toString().trim()
+      if (regOut && regOut.toLowerCase().endsWith('.qbw')) {
+        return { success: true, path: regOut }
+      }
+
+      return { success: false, error: 'QuickBooks is not running or no company file is open.' }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+}
