@@ -58,10 +58,16 @@ declare global {
           transactions: Record<string, string>[],
           type: string
         ) => Promise<{ success: boolean; content?: string; error?: string }>
+        /** Deposit-specific IIF: puts NAME on TRNS (bank/debit) AND SPL (income/credit) lines */
+        generateDepositIIF: (
+          transactions: Record<string, string>[]
+        ) => Promise<{ success: boolean; content?: string; error?: string }>
         saveIIF: (
           content: string,
           filePath: string
         ) => Promise<{ success: boolean; error?: string }>
+        /** Reveal a file highlighted in Windows Explorer */
+        showInFolder: (filePath: string) => Promise<{ success: boolean }>
       }
       qb: {
         connect: (

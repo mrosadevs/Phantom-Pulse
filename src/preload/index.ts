@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('files:generateIIF', transactions, type),
     saveIIF: (content: string, filePath: string) =>
       ipcRenderer.invoke('files:saveIIF', content, filePath),
+    generateDepositIIF: (transactions: unknown[]) =>
+      ipcRenderer.invoke('files:generateDepositIIF', transactions),
     showInFolder: (filePath: string) =>
       ipcRenderer.invoke('files:showInFolder', filePath)
   },

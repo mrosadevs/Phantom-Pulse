@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
 import * as fs from 'fs'
 import * as path from 'path'
-import { parseIIF, generateIIF } from '../files/iif'
+import { parseIIF, generateIIF, generateDepositIIF } from '../files/iif'
 import Store from 'electron-store'
 
 const store = new Store()
@@ -110,12 +110,28 @@ export function registerFileHandlers(ipcMain: IpcMain): void {
     }
   )
 
-  // Generate IIF file content
+  // Generate IIF file content (generic)
   ipcMain.handle(
     'files:generateIIF',
     async (_, transactions: Record<string, string>[], type: string) => {
       try {
         const content = generateIIF(transactions, type)
+        return { success: true, content }
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  // Generate Deposit-specific IIF — places NAME on both TRNS (bank/debit) and SPL
+  // (income/credit) lines so QB shows the payee on both sides of the GL.
+  // This is the only way to match what QB's Batch Enter Transactions produces
+  // because QBXML DepositAdd has no header-level EntityRef.
+  ipcMain.handle(
+    'files:generateDepositIIF',
+    async (_, transactions: Record<string, string>[]) => {
+      try {
+        const content = generateDepositIIF(transactions)
         return { success: true, content }
       } catch (err: unknown) {
         return { success: false, error: err instanceof Error ? err.message : String(err) }
