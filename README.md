@@ -13,7 +13,7 @@
 
 ---
 
-📊 **Dashboard** · 📥 **Import** · 📤 **Export** · ✏️ **Modify** · 🗑️ **Delete** · ⏳ **History** · ⚙️ **Settings**
+📊 **Dashboard** · 📥 **Import** · 📤 **Export** · ✏️ **Modify** · 🗑️ **Delete** · ⏳ **History** · 📒 **GL Import** · ⚙️ **Settings**
 
 ---
 
@@ -29,7 +29,7 @@ Built with **Electron + React + TypeScript** and powered by **Recharts** for dat
 
 ## 🚀 Features
 
-### 📱 7 Core Pages
+### 📱 8 Core Pages
 
 | Page | Description |
 |------|-------------|
@@ -39,6 +39,7 @@ Built with **Electron + React + TypeScript** and powered by **Recharts** for dat
 | 🗑️ **Delete** | Smart filtering and batch deletion with safety confirmations |
 | 📤 **Export** | Generate polished Excel workbooks with formatted sheets |
 | ⏳ **History** | Full audit trail of all imports, edits, and exports |
+| 📒 **GL Import** | Upload a QuickBooks General Ledger PDF and auto-import the Chart of Accounts, Customers, and Vendors directly into QB Desktop |
 | ⚙️ **Settings** | App preferences, data management, and theme options |
 
 ### 📊 Data Visualization
@@ -58,6 +59,7 @@ Built with **Electron + React + TypeScript** and powered by **Recharts** for dat
 - 📤 Multi-sheet Excel export with formatting
 - 🔗 **WinAX integration** for direct QuickBooks COM access (Windows)
 - 📦 PapaParse for lightning-fast CSV parsing
+- 📒 **GL PDF Import** — parse a QB General Ledger PDF and bulk-create accounts, customers, and vendors in QB Desktop via QBSDK
 
 ### 🎨 Design & UX
 - 🌙 Dark cyberpunk theme with purple and cyan accents
@@ -83,6 +85,7 @@ Built with **Electron + React + TypeScript** and powered by **Recharts** for dat
 | 📑 **PapaParse** | CSV parsing engine |
 | 🎭 **Framer Motion** | Smooth animations |
 | 🔗 **WinAX** | QuickBooks Desktop COM bridge |
+| 🐍 **Python + pypdf** | General Ledger PDF parsing |
 | 💾 **electron-store** | Persistent app settings |
 
 ---
@@ -93,6 +96,7 @@ Built with **Electron + React + TypeScript** and powered by **Recharts** for dat
 - [Node.js](https://nodejs.org/) (v18+)
 - npm (comes with Node.js)
 - Windows (required for QuickBooks Desktop COM integration)
+- [Python 3](https://www.python.org/) + `pip install pypdf` (required for GL PDF parsing)
 
 ### Installation
 
@@ -146,6 +150,7 @@ This generates a Windows `.exe` installer in the `dist/` folder.
 │   ├── 📄 pages/
 │   │   ├── Dashboard.tsx           # Financial overview
 │   │   ├── Import/                 # Import wizard
+│   │   ├── GLImport/               # GL PDF → QB accounts/customers/vendors
 │   │   ├── Modify.tsx              # Bulk editing
 │   │   ├── Delete.tsx              # Batch deletion
 │   │   ├── Export.tsx              # Excel export

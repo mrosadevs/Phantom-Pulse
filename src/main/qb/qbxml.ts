@@ -694,23 +694,52 @@ function amt(value: string | undefined | null): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Auto-create entities (Customer / Vendor) so imports don't fail on missing names
+// GL Entity Import Builders
+// Used by the GL Import feature to create accounts, customers, and vendors
+// directly from a parsed General Ledger PDF.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * AccountAdd — creates a new account in the Chart of Accounts.
+ * AccountType must be one of the QBXML AccountType enum values.
+ */
+export function buildAccountAddXML(name: string, accountType: string, requestId: string): string {
+  return `${QBXML_HEADER}
+    <AccountAddRq requestID="${requestId}">
+      <AccountAdd>
+        <Name>${escapeXML(name.slice(0, 31))}</Name>
+        <AccountType>${escapeXML(accountType)}</AccountType>
+      </AccountAdd>
+    </AccountAddRq>
+  ${QBXML_FOOTER}`
+}
+
+/**
+ * CustomerAdd — creates a new customer in the Customer Center.
+ */
 export function buildCustomerAddXML(name: string, requestId: string): string {
   return `${QBXML_HEADER}
     <CustomerAddRq requestID="${requestId}">
-      <CustomerAdd><Name>${escapeXML(name)}</Name></CustomerAdd>
+      <CustomerAdd>
+        <Name>${escapeXML(name.slice(0, 41))}</Name>
+        <CompanyName>${escapeXML(name.slice(0, 41))}</CompanyName>
+      </CustomerAdd>
     </CustomerAddRq>
-${QBXML_FOOTER}`
+  ${QBXML_FOOTER}`
 }
 
+/**
+ * VendorAdd — creates a new vendor in the Vendor Center.
+ */
 export function buildVendorAddXML(name: string, requestId: string): string {
   return `${QBXML_HEADER}
     <VendorAddRq requestID="${requestId}">
-      <VendorAdd><Name>${escapeXML(name)}</Name></VendorAdd>
+      <VendorAdd>
+        <Name>${escapeXML(name.slice(0, 41))}</Name>
+        <CompanyName>${escapeXML(name.slice(0, 41))}</CompanyName>
+      </VendorAdd>
     </VendorAddRq>
-${QBXML_FOOTER}`
+  ${QBXML_FOOTER}`
 }
 
 function escapeXML(str: string): string {

@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
 import * as fs from 'fs'
 import * as path from 'path'
+import { spawnSync } from 'child_process'
 import { parseIIF, generateIIF, generateDepositIIF } from '../files/iif'
 import Store from 'electron-store'
 
@@ -153,6 +154,53 @@ export function registerFileHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('files:showInFolder', async (_, filePath: string) => {
     shell.showItemInFolder(filePath)
     return { success: true }
+  })
+
+  // Parse a QuickBooks General Ledger PDF and extract accounts/customers/vendors.
+  // Spawns the bundled Python script (parse_gl.py) which uses pypdf.
+  ipcMain.handle('files:parseGLPdf', async (_, pdfPath: string) => {
+    try {
+      // Locate the Python script — works in dev (src/) and production (resources/)
+      const scriptCandidates = [
+        path.join(__dirname, '../../src/main/files/parse_gl.py'),  // dev
+        path.join(process.resourcesPath ?? '', 'parse_gl.py'),      // production
+        path.join(__dirname, 'parse_gl.py')                         // same dir
+      ]
+      const scriptPath = scriptCandidates.find((p) => fs.existsSync(p))
+      if (!scriptPath) {
+        return { success: false, error: 'parse_gl.py not found — ensure Python & pypdf are installed.' }
+      }
+
+      // Try python3 first, fall back to python
+      for (const cmd of ['python3', 'python']) {
+        const result = spawnSync(cmd, [scriptPath, pdfPath], {
+          encoding: 'utf-8',
+          timeout: 60_000,
+          maxBuffer: 10 * 1024 * 1024
+        })
+        if (result.status === 0 && result.stdout) {
+          try {
+            const data = JSON.parse(result.stdout)
+            if (data.error) return { success: false, error: data.error }
+            return { success: true, data }
+          } catch {
+            return { success: false, error: 'Invalid JSON from GL parser.' }
+          }
+        }
+        if (result.status !== null && result.status !== 0) {
+          // Python found but script errored — surface the stderr message
+          const msg = result.stderr?.trim() || `Exit code ${result.status}`
+          return { success: false, error: msg }
+        }
+        // status null = command not found, try next
+      }
+      return {
+        success: false,
+        error: 'Python not found. Install Python 3 and run: pip install pypdf'
+      }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   // History handlers

@@ -1,4 +1,40 @@
 // Type declarations for the Electron preload API
+
+export interface GLAccount {
+  name: string
+  type: string
+  include: boolean
+}
+
+export interface GLEntity {
+  name: string
+  type: 'Customer' | 'Vendor'
+  debitTotal: number
+  creditTotal: number
+  include: boolean
+}
+
+export interface GLParseResult {
+  accounts: GLAccount[]
+  customers: GLEntity[]
+  vendors: GLEntity[]
+  ambiguous: GLEntity[]
+  pageCount: number
+}
+
+export interface GLImportEntity {
+  category: 'account' | 'customer' | 'vendor'
+  name: string
+  accountType?: string
+}
+
+export interface GLImportResultItem {
+  name: string
+  category: string
+  success: boolean
+  error?: string
+}
+
 export interface QBStatus {
   connected: boolean
   companyFile?: string
@@ -68,6 +104,12 @@ declare global {
         ) => Promise<{ success: boolean; error?: string }>
         /** Reveal a file highlighted in Windows Explorer */
         showInFolder: (filePath: string) => Promise<{ success: boolean }>
+        /** Parse a QB General Ledger PDF → accounts / customers / vendors */
+        parseGLPdf: (pdfPath: string) => Promise<{
+          success: boolean
+          data?: GLParseResult
+          error?: string
+        }>
       }
       qb: {
         connect: (
@@ -90,6 +132,11 @@ declare global {
         ) => Promise<{
           success: boolean
           results?: { txnId: string; success: boolean; error?: string }[]
+          error?: string
+        }>
+        importGLEntities: (entities: GLImportEntity[]) => Promise<{
+          success: boolean
+          results?: GLImportResultItem[]
           error?: string
         }>
         getCompanyInfo: () => Promise<{ success: boolean; data?: unknown; error?: string }>
