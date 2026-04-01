@@ -1,7 +1,13 @@
 import { IpcMain } from 'electron'
 import { execSync } from 'child_process'
 import { QBConnection } from '../qb/connection'
-import { buildQBXMLRequest, parseQBXMLResponse } from '../qb/qbxml'
+import {
+  buildQBXMLRequest,
+  parseQBXMLResponse,
+  buildAccountAddXML,
+  buildCustomerAddXML,
+  buildVendorAddXML
+} from '../qb/qbxml'
 import { importTransactions } from '../qb/importer'
 import { exportTransactions } from '../qb/exporter'
 
@@ -163,6 +169,62 @@ export function registerQBHandlers(ipcMain: IpcMain): void {
       return { success: false, data: [], error: err instanceof Error ? err.message : String(err) }
     }
   })
+
+  // Import GL entities (accounts, customers, vendors) extracted from a GL PDF
+  ipcMain.handle(
+    'qb:importGLEntities',
+    async (
+      _,
+      entities: { category: 'account' | 'customer' | 'vendor'; name: string; accountType?: string }[]
+    ) => {
+      try {
+        if (!qbConnection.isConnected()) {
+          return { success: false, error: 'Not connected to QuickBooks Desktop' }
+        }
+
+        const results: { name: string; category: string; success: boolean; error?: string }[] = []
+
+        for (const entity of entities) {
+          const requestId = `gl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+          let xml: string
+
+          if (entity.category === 'account') {
+            xml = buildAccountAddXML(entity.name, entity.accountType || 'Expense', requestId)
+          } else if (entity.category === 'customer') {
+            xml = buildCustomerAddXML(entity.name, requestId)
+          } else {
+            xml = buildVendorAddXML(entity.name, requestId)
+          }
+
+          try {
+            const response = await qbConnection.sendRequest(xml)
+            const parsed = parseQBXMLResponse(response)
+            const ok = parsed.statusCode === '0' || parsed.statusCode === '3100' // 3100 = already exists
+            results.push({
+              name: entity.name,
+              category: entity.category,
+              success: ok,
+              error: ok ? undefined : `QB error ${parsed.statusCode}: ${parsed.statusMessage}`
+            })
+          } catch (e: unknown) {
+            results.push({
+              name: entity.name,
+              category: entity.category,
+              success: false,
+              error: e instanceof Error ? e.message : String(e)
+            })
+          }
+
+          // Small delay between requests to avoid overwhelming QB
+          await new Promise((r) => setTimeout(r, 50))
+        }
+
+        return { success: true, results }
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
 
   // Auto-detect QB company file path from the running QB process
   ipcMain.handle('qb:detectCompanyFile', async () => {

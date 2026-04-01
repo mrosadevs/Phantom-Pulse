@@ -10,7 +10,8 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Loader2
+  Loader2,
+  BookOpen
 } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import { useQBStore } from '../../store/useQBStore'
@@ -22,7 +23,8 @@ const NAV_ITEMS = [
   { path: '/export', icon: Download, label: 'Export' },
   { path: '/modify', icon: PenLine, label: 'Modify' },
   { path: '/delete', icon: Trash2, label: 'Delete' },
-  { path: '/history', icon: History, label: 'History' }
+  { path: '/history', icon: History, label: 'History' },
+  { path: '/gl-import', icon: BookOpen, label: 'GL Import' }
 ]
 
 export default function Sidebar() {
