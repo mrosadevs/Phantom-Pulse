@@ -9,6 +9,7 @@ import ModifyPage from './pages/Modify'
 import HistoryPage from './pages/History'
 import SettingsPage from './pages/Settings'
 import GLImportPage from './pages/GLImport'
+import LedgerPage from './pages/Ledger'
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="modify" element={<ModifyPage />} />
           <Route path="history" element={<HistoryPage />} />
           <Route path="gl-import" element={<GLImportPage />} />
+          <Route path="ledger" element={<LedgerPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>

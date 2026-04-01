@@ -203,6 +203,41 @@ export function registerFileHandlers(ipcMain: IpcMain): void {
     }
   })
 
+  // Export Ledger rows to Excel (5-column Phantom Ledger format)
+  ipcMain.handle(
+    'files:exportLedger',
+    async (
+      _,
+      transactions: { date: string; clean: string; account: string; amount: number; original: string }[],
+      filePath: string
+    ) => {
+      try {
+        const headers = ['Date', 'Clean Transaction', 'Account', 'Amount', 'Original Transaction']
+        const rows = transactions.map((t) => ({
+          Date: t.date,
+          'Clean Transaction': t.clean,
+          Account: t.account || '',
+          Amount: t.amount,
+          'Original Transaction': t.original
+        }))
+        const worksheet = XLSX.utils.json_to_sheet(rows, { header: headers })
+        worksheet['!cols'] = [
+          { wch: 12 },
+          { wch: 35 },
+          { wch: 28 },
+          { wch: 12 },
+          { wch: 55 }
+        ]
+        const workbook = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Transactions')
+        XLSX.writeFile(workbook, filePath)
+        return { success: true }
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
   // History handlers
   ipcMain.handle('history:getAll', async () => {
     return store.get('history', [])
