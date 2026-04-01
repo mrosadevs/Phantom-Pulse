@@ -35,6 +35,14 @@ export interface GLImportResultItem {
   error?: string
 }
 
+export interface LedgerRow {
+  date: string
+  clean: string
+  account: string
+  amount: number
+  original: string
+}
+
 export interface QBStatus {
   connected: boolean
   companyFile?: string
@@ -110,6 +118,11 @@ declare global {
           data?: GLParseResult
           error?: string
         }>
+        /** Export Ledger rows to a 5-column Excel file */
+        exportLedger: (
+          transactions: LedgerRow[],
+          filePath: string
+        ) => Promise<{ success: boolean; error?: string }>
       }
       qb: {
         connect: (
@@ -158,6 +171,12 @@ declare global {
         getItems: () => Promise<{
           success: boolean
           data?: Record<string, string>[]
+          error?: string
+        }>
+        /** Scan last 500 Bills+Checks to build vendor→account map */
+        getVendorAccountMap: () => Promise<{
+          success: boolean
+          data?: Record<string, string>
           error?: string
         }>
       }

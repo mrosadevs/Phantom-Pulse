@@ -27,7 +27,9 @@ contextBridge.exposeInMainWorld('api', {
     showInFolder: (filePath: string) =>
       ipcRenderer.invoke('files:showInFolder', filePath),
     parseGLPdf: (pdfPath: string) =>
-      ipcRenderer.invoke('files:parseGLPdf', pdfPath)
+      ipcRenderer.invoke('files:parseGLPdf', pdfPath),
+    exportLedger: (transactions: unknown[], filePath: string) =>
+      ipcRenderer.invoke('files:exportLedger', transactions, filePath)
   },
 
   // QuickBooks Desktop operations
@@ -49,7 +51,9 @@ contextBridge.exposeInMainWorld('api', {
     getItems: () => ipcRenderer.invoke('qb:getItems'),
     detectCompanyFile: () => ipcRenderer.invoke('qb:detectCompanyFile'),
     importGLEntities: (entities: unknown[]) =>
-      ipcRenderer.invoke('qb:importGLEntities', entities)
+      ipcRenderer.invoke('qb:importGLEntities', entities),
+    getVendorAccountMap: () =>
+      ipcRenderer.invoke('qb:getVendorAccountMap')
   },
 
   // History/store operations
