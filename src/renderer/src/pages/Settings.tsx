@@ -12,10 +12,23 @@ import {
   Shield,
   X,
   Zap,
-  TriangleAlert
+  TriangleAlert,
+  RefreshCw,
+  Download,
+  Sparkles,
+  Tag
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useQBStore } from '../store/useQBStore'
+
+type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'up-to-date'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
 
 const STORAGE_KEY = 'qb_company_file_path'
 
@@ -26,6 +39,13 @@ export default function SettingsPage() {
   const [detecting, setDetecting] = useState(false)
   const [connectStep, setConnectStep] = useState('')
   const listenerRef = useRef(false)
+
+  // Updater state
+  const [appVersion, setAppVersion] = useState<string>('')
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle')
+  const [updateVersion, setUpdateVersion] = useState<string>('')
+  const [downloadPercent, setDownloadPercent] = useState(0)
+  const [updateError, setUpdateError] = useState<string>('')
 
   // Persist path whenever it changes
   useEffect(() => {
@@ -42,7 +62,34 @@ export default function SettingsPage() {
       electronOn('qb:connectProgress', (_: unknown, data: { step: string; detail: string }) => {
         setConnectStep(data.detail ?? data.step)
       })
+      electronOn(
+        'updater:status',
+        (
+          _: unknown,
+          data: { status: UpdateStatus; version?: string; error?: string }
+        ) => {
+          setUpdateStatus(data.status)
+          if (data.version) setUpdateVersion(data.version)
+          if (data.error) setUpdateError(data.error)
+          if (data.status === 'available') {
+            toast.info(`Update v${data.version} is available — downloading…`)
+          } else if (data.status === 'downloaded') {
+            toast.success(`v${data.version} downloaded — restart to install.`)
+          } else if (data.status === 'error') {
+            toast.error(`Update error: ${data.error}`)
+          }
+        }
+      )
+      electronOn('updater:progress', (_: unknown, data: { percent: number }) => {
+        setUpdateStatus('downloading')
+        setDownloadPercent(data.percent)
+      })
     }
+  }, [])
+
+  // Fetch current app version on mount
+  useEffect(() => {
+    window.api.updater.getVersion().then(setAppVersion).catch(() => {})
   }, [])
 
   const setPath = (raw: string) => {
@@ -94,6 +141,21 @@ export default function SettingsPage() {
   const handleCancelConnect = async () => {
     await cancelConnect()
     toast.info('Connection cancelled')
+  }
+
+  const handleCheckForUpdates = async () => {
+    setUpdateStatus('checking')
+    setUpdateError('')
+    const result = await window.api.updater.check()
+    if (result?.error) {
+      setUpdateStatus('error')
+      setUpdateError(result.error)
+      toast.error(`Could not check for updates: ${result.error}`)
+    }
+  }
+
+  const handleInstallUpdate = () => {
+    window.api.updater.install()
   }
 
   return (
@@ -442,6 +504,164 @@ export default function SettingsPage() {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Application Updates section */}
+        <div className="glass-card p-6 space-y-5">
+          <div className="flex items-center gap-3 pb-4 border-b border-white/[0.08]">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Download size={20} className="text-primary" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-text-primary">Application Updates</h2>
+              <p className="text-text-muted text-xs mt-0.5">
+                Automatically checks GitHub Releases for new versions on launch
+              </p>
+            </div>
+            {appVersion && (
+              <div className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-bg-elevated border border-white/[0.10] text-xs text-text-muted">
+                <Tag size={11} />
+                v{appVersion}
+              </div>
+            )}
+          </div>
+
+          {/* Status display */}
+          <AnimatePresence mode="wait">
+            {updateStatus === 'up-to-date' && (
+              <motion.div
+                key="up-to-date"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="flex items-center gap-3 p-4 rounded-xl bg-success/5 border border-success/20"
+              >
+                <CheckCircle2 size={18} className="text-success flex-shrink-0" />
+                <div>
+                  <p className="text-success font-medium text-sm">You're up to date</p>
+                  <p className="text-text-muted text-xs mt-0.5">
+                    v{updateVersion || appVersion} is the latest version
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
+            {updateStatus === 'available' && (
+              <motion.div
+                key="available"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="flex items-center gap-3 p-4 rounded-xl bg-primary/5 border border-primary/20"
+              >
+                <Sparkles size={18} className="text-primary flex-shrink-0" />
+                <div>
+                  <p className="text-primary font-medium text-sm">
+                    v{updateVersion} is available — downloading…
+                  </p>
+                  <p className="text-text-muted text-xs mt-0.5">
+                    The update will install automatically when it's ready
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
+            {updateStatus === 'downloading' && (
+              <motion.div
+                key="downloading"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="space-y-3 p-4 rounded-xl bg-primary/5 border border-primary/20"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Loader2 size={16} className="text-primary animate-spin flex-shrink-0" />
+                    <p className="text-primary font-medium text-sm">
+                      Downloading v{updateVersion}…
+                    </p>
+                  </div>
+                  <span className="text-primary text-xs font-mono">{downloadPercent}%</span>
+                </div>
+                <div className="w-full h-1.5 rounded-full bg-primary/20 overflow-hidden">
+                  <motion.div
+                    className="h-full rounded-full bg-primary"
+                    animate={{ width: `${downloadPercent}%` }}
+                    transition={{ duration: 0.3 }}
+                  />
+                </div>
+              </motion.div>
+            )}
+
+            {updateStatus === 'downloaded' && (
+              <motion.div
+                key="downloaded"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="flex items-center gap-3 p-4 rounded-xl bg-success/5 border border-success/20"
+              >
+                <CheckCircle2 size={18} className="text-success flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-success font-medium text-sm">
+                    v{updateVersion} is ready to install
+                  </p>
+                  <p className="text-text-muted text-xs mt-0.5">
+                    Restart the app to apply the update
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
+            {updateStatus === 'error' && (
+              <motion.div
+                key="error"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="flex items-start gap-3 p-4 rounded-xl bg-danger/5 border border-danger/20"
+              >
+                <AlertCircle size={18} className="text-danger flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-danger font-medium text-sm">Update check failed</p>
+                  <p className="text-text-muted text-xs mt-0.5 break-all">{updateError}</p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Action buttons */}
+          <div className="flex gap-3">
+            <button
+              onClick={handleCheckForUpdates}
+              disabled={updateStatus === 'checking' || updateStatus === 'downloading'}
+              className="btn-secondary flex items-center gap-2 px-5 py-2.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {updateStatus === 'checking' ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <RefreshCw size={15} />
+              )}
+              {updateStatus === 'checking' ? 'Checking…' : 'Check for Updates'}
+            </button>
+
+            {updateStatus === 'downloaded' && (
+              <motion.button
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                onClick={handleInstallUpdate}
+                className="btn-primary flex items-center gap-2 px-5 py-2.5 text-sm"
+              >
+                <Download size={15} />
+                Restart &amp; Install
+              </motion.button>
+            )}
+          </div>
+
+          <p className="text-text-disabled text-xs">
+            Updates are downloaded automatically in the background. You'll be notified when a new
+            version is ready to install.
+          </p>
         </div>
       </motion.div>
     </div>
