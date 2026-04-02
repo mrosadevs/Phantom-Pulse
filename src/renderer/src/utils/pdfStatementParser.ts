@@ -19,6 +19,13 @@ export interface ParsedTransaction {
   original: string  // raw description before cleaning
 }
 
+export interface ParsedPdfResult {
+  transactions: ParsedTransaction[]
+  accountId: string | null   // last 4+ digits / masked account number detected in PDF
+  fileName: string
+  warnings: string[]
+}
+
 interface TextChunk {
   text: string
   x: number
@@ -57,25 +64,35 @@ const MONTH_MAP: Record<string, number> = {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
+/**
+ * Parse multiple PDFs, returning per-file results including detected account ID.
+ * Preserves original per-file results so the caller can check for account mismatches.
+ */
 export async function parseStatementPdfs(files: File[]): Promise<ParsedTransaction[]> {
-  const all: ParsedTransaction[] = []
+  const results = await parseStatementPdfsWithMeta(files)
+  const all = results.flatMap((r) => r.transactions)
+  all.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+  return all
+}
+
+/**
+ * Like parseStatementPdfs but returns full per-file metadata
+ * (account ID, warnings, transaction count) for mismatch detection.
+ */
+export async function parseStatementPdfsWithMeta(files: File[]): Promise<ParsedPdfResult[]> {
+  const results: ParsedPdfResult[] = []
   for (const file of files) {
     const buf = await file.arrayBuffer()
-    const txns = await parseSinglePdf(new Uint8Array(buf), file.name)
-    all.push(...txns)
+    const result = await parseSinglePdfWithMeta(new Uint8Array(buf), file.name)
+    results.push(result)
   }
-  // Sort chronologically
-  all.sort((a, b) => {
-    const da = new Date(a.date).getTime()
-    const db = new Date(b.date).getTime()
-    return da - db
-  })
-  return all
+  return results
 }
 
 // ── Single PDF ────────────────────────────────────────────────────────────────
 
-async function parseSinglePdf(data: Uint8Array, _fileName: string): Promise<ParsedTransaction[]> {
+async function parseSinglePdfWithMeta(data: Uint8Array, fileName: string): Promise<ParsedPdfResult> {
+  const warnings: string[] = []
   const pdf = await pdfjsLib.getDocument({ data }).promise
   const allLines: LogicalLine[] = []
 
@@ -94,7 +111,14 @@ async function parseSinglePdf(data: Uint8Array, _fileName: string): Promise<Pars
 
   const anchorYear = inferAnchorYear(allLines)
   const colHints = detectColumnHints(allLines)
-  return extractTransactions(allLines, anchorYear, colHints)
+  const transactions = extractTransactions(allLines, anchorYear, colHints)
+  const accountId = detectAccountId(allLines)
+
+  if (transactions.length === 0) {
+    warnings.push('No transactions detected — make sure this is a bank statement PDF.')
+  }
+
+  return { transactions, accountId, fileName, warnings }
 }
 
 // ── Group text chunks into logical lines (same y within tolerance) ─────────────
@@ -235,6 +259,41 @@ function extractLeadingDate(text: string, anchorYear: number): string | null {
   }
 
   return null
+}
+
+// ── Account ID detection (ported from Phantom Ledger's pdfParser.js) ──────────
+
+/**
+ * Scans all lines in a PDF for account number patterns.
+ * Returns the most-frequently seen normalized account token (e.g. "xxxx1234").
+ */
+function detectAccountId(lines: LogicalLine[]): string | null {
+  const counts = new Map<string, number>()
+
+  const bump = (raw: string) => {
+    const normalized = normalizeAccountToken(raw)
+    if (normalized) counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
+  }
+
+  // Pattern 1: explicit label — "Account Number: xxxx1234" / "Acct #xxxx-1234"
+  const explicitRe = /(?:account|acct)\s*(?:number|no\.?|#)?\s*[:\-]?\s*([Xx*\d\-]{4,})/gi
+  // Pattern 2: typed account — "Checking xxxx1234" / "Business Savings ...1234"
+  const typedRe = /\b(?:checking|savings|business\s+checking|money\s*market)\b.*?([Xx*\d\-]{4,})/gi
+
+  for (const line of lines) {
+    for (const m of line.text.matchAll(explicitRe)) bump(m[1])
+    for (const m of line.text.matchAll(typedRe)) bump(m[1])
+  }
+
+  if (counts.size === 0) return null
+  // Return the most-seen candidate
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+}
+
+/** Strip non-alphanumeric (except *), require ≥4 chars */
+function normalizeAccountToken(raw: string): string | null {
+  const compact = String(raw ?? '').replace(/[^A-Za-z0-9*]/g, '')
+  return compact.length >= 4 ? compact.toLowerCase() : null
 }
 
 function parseDescriptionAndAmount(

@@ -61,6 +61,13 @@ contextBridge.exposeInMainWorld('api', {
     getAll: () => ipcRenderer.invoke('history:getAll'),
     add: (entry: unknown) => ipcRenderer.invoke('history:add', entry),
     clear: () => ipcRenderer.invoke('history:clear')
+  },
+
+  // Auto-updater
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    install: () => ipcRenderer.send('updater:install'),
+    getVersion: () => ipcRenderer.invoke('updater:getVersion')
   }
 })
 

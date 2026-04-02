@@ -1,8 +1,14 @@
 import { Minus, Square, X, Zap, Sun, Moon } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
+import { useEffect, useState } from 'react'
 
 export default function TitleBar() {
   const { theme, toggleTheme } = useAppStore()
+  const [version, setVersion] = useState('')
+
+  useEffect(() => {
+    window.api.updater.getVersion().then(setVersion).catch(() => {})
+  }, [])
 
   return (
     <div className="drag-region h-9 flex items-center justify-between px-4 bg-bg-surface/80 border-b border-white/[0.06] flex-shrink-0 backdrop-blur-sm">
@@ -15,6 +21,11 @@ export default function TitleBar() {
           Phantom Pulse
         </span>
         <span className="text-text-disabled text-[11px] font-normal">for QuickBooks Desktop</span>
+        {version && (
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-bg-elevated border border-white/[0.08] text-text-disabled">
+            v{version}
+          </span>
+        )}
       </div>
 
       {/* Window controls */}

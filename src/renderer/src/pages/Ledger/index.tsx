@@ -14,11 +14,13 @@ import {
   ArrowRight,
   BadgeCheck,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  TriangleAlert
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useQBStore } from '../../store/useQBStore'
-import { parseStatementPdfs } from '../../utils/pdfStatementParser'
+import { parseStatementPdfsWithMeta } from '../../utils/pdfStatementParser'
+import type { ParsedPdfResult } from '../../utils/pdfStatementParser'
 import { cleanAndNormalizeTransaction } from '../../utils/transactionCleaner'
 import { matchToQB } from '../../utils/vendorMatcher'
 import type { LedgerRow } from '../../types/electron'
@@ -74,6 +76,9 @@ function EditableCell({ value, onSave }: { value: string; onSave: (v: string) =>
   )
 }
 
+// ── QB map cache — persists for the lifetime of the app session ───────────────
+let cachedQbMap: Record<string, string> | null = null
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function LedgerPage() {
@@ -82,11 +87,17 @@ export default function LedgerPage() {
   const [step, setStep] = useState<Step>('upload')
   const [files, setFiles] = useState<File[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
+  const [processStatus, setProcessStatus] = useState('')
   const [rows, setRows] = useState<LedgerRowWithMeta[]>([])
   const [savedPath, setSavedPath] = useState('')
   const [search, setSearch] = useState('')
   const [matchCount, setMatchCount] = useState(0)
+  const [pdfMetas, setPdfMetas] = useState<ParsedPdfResult[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Derived: detect account mismatches across loaded PDFs
+  const uniqueAccounts = [...new Set(pdfMetas.map((r) => r.accountId).filter(Boolean))]
+  const hasAccountMismatch = uniqueAccounts.length > 1
 
   // ── File handling ───────────────────────────────────────────────────────────
 
@@ -113,34 +124,63 @@ export default function LedgerPage() {
     if (files.length === 0) { toast.error('Add at least one PDF.'); return }
     setIsProcessing(true)
     try {
-      // 1. Parse PDFs
-      const parsed = await parseStatementPdfs(files)
+      // 1. Parse PDFs and fetch QB vendor map in parallel
+      const qbMapPromise: Promise<Record<string, string>> = status.mode === 'qbsdk'
+        ? Promise.race([
+            window.api.qb.getVendorAccountMap().then((res) => (res.success && res.data) ? res.data : {}),
+            new Promise<Record<string, string>>((resolve) => setTimeout(() => resolve({}), 8000))
+          ]).catch(() => ({}))
+        : Promise.resolve({})
+
+      const [metas, qbMap] = await Promise.all([
+        parseStatementPdfsWithMeta(files),
+        qbMapPromise
+      ])
+
+      setPdfMetas(metas)
+
+      // Surface any per-file warnings
+      for (const meta of metas) {
+        for (const w of meta.warnings) toast.warning(`${meta.fileName}: ${w}`)
+      }
+
+      // Warn about duplicate account IDs across files
+      const seen = new Map<string, string>()
+      for (const meta of metas) {
+        if (!meta.accountId) continue
+        if (seen.has(meta.accountId)) {
+          toast.warning(
+            `Duplicate account: ${meta.fileName} and ${seen.get(meta.accountId)} appear to be from the same account.`
+          )
+        } else {
+          seen.set(meta.accountId, meta.fileName)
+        }
+      }
+
+      const parsed = metas.flatMap((r) => r.transactions)
+      parsed.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
       if (parsed.length === 0) {
-        toast.error('No transactions found. Make sure these are QuickBooks or bank statement PDFs.')
+        toast.error('No transactions found. Make sure these are bank statement PDFs.')
         return
       }
 
-      // 2. Clean descriptions
-      const cleaned = parsed.map((t) => ({ ...t, clean: cleanAndNormalizeTransaction(t.description) }))
-
-      // 3. Try QB vendor/account map if connected
-      let qbMap: Record<string, string> = {}
-      if (status.mode === 'qbsdk') {
-        try {
-          const res = await window.api.qb.getVendorAccountMap()
-          if (res.success && res.data) qbMap = res.data
-        } catch { /* non-fatal */ }
-      }
-
-      // 4. Match and build rows
+      // 3. For each transaction:
+      //    - Try to match to a QB vendor → use QB account if found
+      //    - If no match → clean description with Phantom Ledger rules (already applied via cleanAndNormalizeTransaction)
       let matched = 0
-      const result: LedgerRowWithMeta[] = cleaned.map((t, i) => {
-        const match = matchToQB(t.clean, qbMap)
+      const result: LedgerRowWithMeta[] = parsed.map((t, i) => {
+        // Clean the raw description first
+        const cleaned = cleanAndNormalizeTransaction(t.description)
+        // Try QB match on cleaned name
+        const match = matchToQB(cleaned, qbMap)
         if (match.confidence !== 'none') matched++
         return {
           id: i,
           date: t.date,
-          clean: match.vendorName || t.clean,
+          // If QB match found → use QB vendor name, else use cleaned description
+          clean: match.vendorName || cleaned,
+          // If QB match found → use the account from QB history, else leave blank
           account: match.account || '',
           amount: t.amount,
           original: t.original,
@@ -217,7 +257,7 @@ export default function LedgerPage() {
         </div>
         {step !== 'upload' && (
           <button
-            onClick={() => { setStep('upload'); setFiles([]); setRows([]); setSavedPath('') }}
+            onClick={() => { setStep('upload'); setFiles([]); setRows([]); setSavedPath(''); setPdfMetas([]) }}
             className="btn-secondary flex items-center gap-2 py-1.5 px-3 text-sm"
           >
             <RefreshCw size={13} /> Start Over
@@ -298,20 +338,54 @@ export default function LedgerPage() {
 
               {/* File queue */}
               {files.length > 0 && (
-                <div className="w-full max-w-lg glass-card divide-y divide-white/[0.05]">
-                  {files.map((f) => (
-                    <div key={f.name} className="flex items-center gap-3 px-4 py-2.5">
-                      <FileText size={14} className="text-primary flex-shrink-0" />
-                      <span className="text-xs text-text-secondary flex-1 truncate">{f.name}</span>
-                      <span className="text-[11px] text-text-disabled flex-shrink-0">
-                        {(f.size / 1024).toFixed(0)} KB
-                      </span>
-                      <button onClick={(e) => { e.stopPropagation(); removeFile(f.name) }}
-                        className="text-text-disabled hover:text-danger transition-colors">
-                        <X size={13} />
-                      </button>
+                <div className="w-full max-w-lg space-y-1.5">
+                  {/* Account mismatch warning */}
+                  {hasAccountMismatch && (
+                    <div className="flex items-start gap-2.5 px-4 py-2.5 glass-card bg-danger/5 border-danger/20">
+                      <TriangleAlert size={14} className="text-danger flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs text-danger font-medium">Account mismatch detected</p>
+                        <p className="text-[11px] text-text-muted mt-0.5">
+                          These PDFs appear to be from different bank accounts: {uniqueAccounts.join(', ')}. Make sure all files are from the same account.
+                        </p>
+                      </div>
                     </div>
-                  ))}
+                  )}
+
+                  <div className="glass-card divide-y divide-white/[0.05]">
+                    {files.map((f) => {
+                      const meta = pdfMetas.find((m) => m.fileName === f.name)
+                      return (
+                        <div key={f.name} className="flex items-center gap-3 px-4 py-2.5">
+                          <FileText size={14} className="text-primary flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs text-text-secondary truncate block">{f.name}</span>
+                            {meta && (
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {meta.accountId && (
+                                  <span className="text-[10px] text-text-disabled font-mono">
+                                    Acct: {meta.accountId}
+                                  </span>
+                                )}
+                                {meta.transactions.length > 0 && (
+                                  <span className="text-[10px] text-text-disabled">
+                                    {meta.transactions.length} transactions
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-text-disabled flex-shrink-0">
+                            {(f.size / 1024).toFixed(0)} KB
+                          </span>
+                          <button onClick={(e) => { e.stopPropagation(); removeFile(f.name) }}
+                            className="text-text-disabled hover:text-danger transition-colors">
+                            <X size={13} />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
 
@@ -502,7 +576,7 @@ export default function LedgerPage() {
                     <FolderOpen size={14} /> Open Folder
                   </button>
                   <button
-                    onClick={() => { setStep('upload'); setFiles([]); setRows([]); setSavedPath('') }}
+                    onClick={() => { setStep('upload'); setFiles([]); setRows([]); setSavedPath(''); setPdfMetas([]) }}
                     className="btn-primary flex-1 flex items-center justify-center gap-2 py-2.5"
                   >
                     <ArrowRight size={14} /> Process Another

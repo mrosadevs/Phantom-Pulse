@@ -122,6 +122,20 @@ export default function Sidebar() {
         >
           {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         </button>
+
+        {/* Version number */}
+        <AnimatePresence>
+          {!sidebarCollapsed && (
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="text-center text-[10px] text-text-disabled/50 font-mono pb-0.5 select-none"
+            >
+              v1.0.0
+            </motion.p>
+          )}
+        </AnimatePresence>
       </div>
     </motion.aside>
   )

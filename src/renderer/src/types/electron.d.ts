@@ -185,6 +185,11 @@ declare global {
         add: (entry: Omit<HistoryEntry, 'id' | 'timestamp'>) => Promise<{ success: boolean }>
         clear: () => Promise<{ success: boolean }>
       }
+      updater: {
+        check: () => Promise<{ success?: boolean; error?: string }>
+        install: () => void
+        getVersion: () => Promise<string>
+      }
     }
   }
 }
