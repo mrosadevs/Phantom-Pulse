@@ -173,10 +173,30 @@ declare global {
           data?: Record<string, string>[]
           error?: string
         }>
+        /** Detect the open .qbw path from the running QuickBooks process */
+        detectCompanyFile: () => Promise<{
+          success: boolean
+          path?: string
+          error?: string
+        }>
         /** Scan last 500 Bills+Checks to build vendor→account map */
         getVendorAccountMap: () => Promise<{
           success: boolean
           data?: Record<string, string>
+          error?: string
+        }>
+        /**
+         * Entity → account histograms from Bills, Checks, Credit Card Charges,
+         * and Deposits, plus the vendor and customer name lists.  Powers the
+         * Ledger pipeline's three-tier matcher and ambiguity guard.
+         */
+        getEntityAccountStats: () => Promise<{
+          success: boolean
+          data?: {
+            vendors: string[]
+            customers: string[]
+            stats: Record<string, Record<string, number>>
+          }
           error?: string
         }>
       }

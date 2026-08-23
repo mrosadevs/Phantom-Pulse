@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { TRANSACTION_TYPES } from '../data/transactionTypes'
 import { useQBStore } from '../store/useQBStore'
 import { useHistoryStore } from '../store/useHistoryStore'
+import EmptyState from '../components/ui/EmptyState'
 
 interface TxnRow {
   TxnID: string
@@ -37,8 +38,8 @@ export default function DeletePage() {
   const [hasQueried, setHasQueried] = useState(false)
 
   const handleQuery = async () => {
-    if (!txnType) return toast.error('Select a transaction type')
-    if (!status.connected) return toast.error('Connect to QuickBooks Desktop first')
+    if (!txnType) { toast.error('Select a transaction type'); return }
+    if (!status.connected) { toast.error('Connect to QuickBooks Desktop first'); return }
 
     setIsQuerying(true)
     setSelected(new Set())
@@ -219,6 +220,18 @@ export default function DeletePage() {
             </div>
           </div>
         </div>
+
+        {/* Idle state */}
+        {!hasQueried && (
+          <div className="flex-1 flex items-center justify-center glass-card">
+            <EmptyState
+              icon={Trash2}
+              tone="danger"
+              title="Find the transactions to remove"
+              description="Query QuickBooks first, then select exactly which rows to delete. Nothing is removed until you confirm — deletions cannot be undone from here."
+            />
+          </div>
+        )}
 
         {/* Transaction table */}
         {hasQueried && (

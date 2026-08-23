@@ -9,6 +9,7 @@ import {
   buildBillPaymentCheckAddXML,
   buildPurchaseOrderAddXML,
   buildCreditCardChargeAddXML,
+  buildCreditCardCreditAddXML,
   buildCheckAddXML,
   buildDepositAddXML,
   buildTransferAddXML,
@@ -84,7 +85,7 @@ export async function importTransactions(
 
   // Determine which entity type to auto-create based on transaction type
   const customerTypes = ['Deposit', 'Invoice', 'Sales Receipt', 'Receive Payment', 'Credit Memo', 'Estimate']
-  const vendorTypes = ['Check', 'Bill', 'Bill Payment', 'Purchase Order', 'Credit Card Charge']
+  const vendorTypes = ['Check', 'Bill', 'Bill Payment', 'Purchase Order', 'Credit Card Charge', 'Credit Card Credit']
 
   // Collect unique payee names and auto-create them BEFORE importing
   const uniquePayees = new Set<string>()
@@ -172,6 +173,8 @@ function buildTransactionXML(
       return buildPurchaseOrderAddXML(row, requestId)
     case 'Credit Card Charge':
       return buildCreditCardChargeAddXML(row, requestId)
+    case 'Credit Card Credit':
+      return buildCreditCardCreditAddXML(row, requestId)
 
     // Banking
     case 'Check':

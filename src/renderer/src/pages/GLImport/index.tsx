@@ -157,7 +157,8 @@ export default function GLImportPage() {
       e.preventDefault()
       const file = e.dataTransfer.files[0]
       if (file?.name.endsWith('.pdf')) {
-        setPdfPath(file.path)
+        // Electron extends the DOM File with the on-disk path
+        setPdfPath((file as File & { path: string }).path)
         setFileName(file.name)
       } else {
         toast.error('Please drop a PDF file.')

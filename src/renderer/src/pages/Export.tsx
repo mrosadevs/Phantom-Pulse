@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { TRANSACTION_TYPES } from '../data/transactionTypes'
 import { useQBStore } from '../store/useQBStore'
 import { useHistoryStore } from '../store/useHistoryStore'
+import EmptyState from '../components/ui/EmptyState'
 
 export default function ExportPage() {
   const { status } = useQBStore()
@@ -18,8 +19,8 @@ export default function ExportPage() {
   const [hasQueried, setHasQueried] = useState(false)
 
   const handleQuery = async () => {
-    if (!txnType) return toast.error('Please select a transaction type')
-    if (!status.connected) return toast.error('Connect to QuickBooks Desktop first')
+    if (!txnType) { toast.error('Please select a transaction type'); return }
+    if (!status.connected) { toast.error('Connect to QuickBooks Desktop first'); return }
 
     setIsLoading(true)
     try {
@@ -199,6 +200,18 @@ export default function ExportPage() {
           </div>
         </div>
 
+        {/* Idle state — before the first query the page would otherwise be blank */}
+        {!hasQueried && (
+          <div className="flex-1 flex items-center justify-center glass-card">
+            <EmptyState
+              icon={FileSpreadsheet}
+              tone="primary"
+              title="Pick a transaction type to begin"
+              description="Choose what to pull from QuickBooks, optionally narrow it by date, then run the query. You'll see a preview here before anything is written to disk."
+            />
+          </div>
+        )}
+
         {/* Preview table */}
         {hasQueried && (
           <motion.div
@@ -227,10 +240,13 @@ export default function ExportPage() {
             </div>
 
             {preview.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
-                <AlertCircle size={32} />
-                <p className="text-sm">No transactions found for the selected filters</p>
-              </div>
+              <EmptyState
+                className="flex-1"
+                icon={AlertCircle}
+                tone="warning"
+                title="No transactions matched"
+                description="Nothing in QuickBooks fits these filters. Try widening the date range or picking a different transaction type."
+              />
             ) : (
               <div className="flex-1 overflow-auto">
                 <table className="w-full text-xs border-collapse">
@@ -248,16 +264,21 @@ export default function ExportPage() {
                   </thead>
                   <tbody>
                     {preview.slice(0, 200).map((row, i) => (
-                      <tr
+                      <motion.tr
                         key={i}
-                        className="border-b border-white/[0.05] hover:bg-bg-surface/60"
+                        initial={{ opacity: 0, x: -6 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        // Stagger only the first screenful — beyond that the
+                        // delay would be perceived as lag, not polish.
+                        transition={{ duration: 0.2, delay: Math.min(i, 18) * 0.018 }}
+                        className="border-b border-white/[0.05] hover:bg-primary/[0.06] transition-colors duration-150"
                       >
                         {previewHeaders.map((h) => (
                           <td key={h} className="px-3 py-2 text-text-secondary truncate max-w-[200px]">
                             {row[h] || '—'}
                           </td>
                         ))}
-                      </tr>
+                      </motion.tr>
                     ))}
                   </tbody>
                 </table>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { PenLine, Filter, Save, Loader2, WifiOff, AlertCircle, Edit3, Calendar } from 'lucide-react'
+import EmptyState from '../components/ui/EmptyState'
 import { toast } from 'sonner'
 import { TRANSACTION_TYPES } from '../data/transactionTypes'
 import { useQBStore } from '../store/useQBStore'
@@ -29,8 +30,8 @@ export default function ModifyPage() {
   const [editValue, setEditValue] = useState('')
 
   const handleQuery = async () => {
-    if (!txnType) return toast.error('Select a transaction type')
-    if (!status.connected) return toast.error('Connect to QuickBooks Desktop first')
+    if (!txnType) { toast.error('Select a transaction type'); return }
+    if (!status.connected) { toast.error('Connect to QuickBooks Desktop first'); return }
 
     setIsQuerying(true)
     try {
@@ -69,7 +70,7 @@ export default function ModifyPage() {
   const modifiedRows = rows.filter((r) => r._modified)
 
   const handleSave = async () => {
-    if (!modifiedRows.length) return toast.info('No changes to save')
+    if (!modifiedRows.length) { toast.info('No changes to save'); return }
     toast.info(
       `Save functionality requires QBXML Mod requests for each transaction type. ${modifiedRows.length} rows marked for update.`
     )
@@ -178,6 +179,18 @@ export default function ModifyPage() {
           </div>
         </div>
 
+        {/* Idle state */}
+        {!hasQueried && (
+          <div className="flex-1 flex items-center justify-center glass-card">
+            <EmptyState
+              icon={PenLine}
+              tone="warning"
+              title="Pull transactions in to edit them"
+              description="Query QuickBooks by type and date range, then click any cell to change it. Edited rows are highlighted before you save."
+            />
+          </div>
+        )}
+
         {/* Editable grid */}
         {hasQueried && (
           <motion.div
@@ -202,10 +215,13 @@ export default function ModifyPage() {
             </div>
 
             {rows.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
-                <AlertCircle size={32} />
-                <p className="text-sm">No transactions found</p>
-              </div>
+              <EmptyState
+                className="flex-1"
+                icon={AlertCircle}
+                tone="warning"
+                title="No transactions matched"
+                description="Nothing in QuickBooks fits these filters. Try a wider date range or a different transaction type."
+              />
             ) : (
               <div className="flex-1 overflow-auto">
                 <table className="w-full text-xs border-collapse">

@@ -10,7 +10,9 @@ export interface IIFTransaction {
 }
 
 // IIF headers for common transaction types
-const IIF_HEADERS: Record<string, string[]> = {
+
+// Reference: canonical IIF column layouts per transaction type (kept for documentation)
+export const IIF_HEADERS: Record<string, string[]> = {
   Invoice: [
     '!TRNS',
     'TRNSTYPE',

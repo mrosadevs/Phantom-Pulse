@@ -53,7 +53,9 @@ contextBridge.exposeInMainWorld('api', {
     importGLEntities: (entities: unknown[]) =>
       ipcRenderer.invoke('qb:importGLEntities', entities),
     getVendorAccountMap: () =>
-      ipcRenderer.invoke('qb:getVendorAccountMap')
+      ipcRenderer.invoke('qb:getVendorAccountMap'),
+    getEntityAccountStats: () =>
+      ipcRenderer.invoke('qb:getEntityAccountStats')
   },
 
   // History/store operations

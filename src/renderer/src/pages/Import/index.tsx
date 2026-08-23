@@ -87,9 +87,12 @@ export default function ImportWizard() {
                     isClickable ? 'cursor-pointer' : 'cursor-default'
                   }`}
                 >
-                  {/* Circle */}
-                  <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 flex-shrink-0 ${
+                  {/* Circle — springs when it becomes the active step */}
+                  <motion.div
+                    animate={{ scale: isActive ? 1.12 : 1 }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 16 }}
+                    whileHover={isClickable ? { scale: 1.15 } : undefined}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors duration-300 flex-shrink-0 ${
                       isDone
                         ? 'bg-gradient-success text-white shadow-glow-success'
                         : isActive
@@ -98,7 +101,7 @@ export default function ImportWizard() {
                     }`}
                   >
                     {isDone ? <CheckCircle2 size={14} /> : <Icon size={13} />}
-                  </div>
+                  </motion.div>
 
                   {/* Label - only show for active or done on larger screens */}
                   <span

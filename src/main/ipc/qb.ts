@@ -369,6 +369,118 @@ export function registerQBHandlers(ipcMain: IpcMain): void {
     }
   })
 
+  // Entity → account histograms for the Ledger pipeline.
+  // Unlike getVendorAccountMap (vendor → single best account), this returns the
+  // full per-entity account distribution so the renderer can apply the
+  // ambiguity guard: a payee whose history is split between e.g. a business
+  // expense and Shareholder Distributions must be decided per transaction,
+  // not silently coded to most_common(1).
+  //
+  // History sources: Bills, Checks, Credit Card Charges, and Deposits —
+  // per METHOD.md, query every transaction type that can hit the account.
+  ipcMain.handle('qb:getEntityAccountStats', async () => {
+    try {
+      if (!qbConnection.isConnected()) {
+        return { success: false, error: 'Not connected to QuickBooks Desktop' }
+      }
+
+      const stats: Record<string, Record<string, number>> = {}
+      const addEntry = (entity: string, account: string): void => {
+        if (!entity || !account) return
+        if (!stats[entity]) stats[entity] = {}
+        stats[entity][account] = (stats[entity][account] || 0) + 1
+      }
+
+      const listQuery = (rq: string): string => `<?xml version="1.0" encoding="utf-8"?>
+<?qbxml version="13.0"?>
+<QBXML><QBXMLMsgsRq onError="stopOnError">
+  <${rq} requestID="stats_${rq}">
+    <MaxReturned>500</MaxReturned>
+    <IncludeLineItems>true</IncludeLineItems>
+  </${rq}>
+</QBXMLMsgsRq></QBXML>`
+
+      // Generic scan: for each <XxxRet> block, take the entity ref
+      // (VendorRef or PayeeEntityRef) and every line AccountRef.
+      const scanBlocks = (xml: string, retTag: string, entityTags: string[]): void => {
+        const blockRe = new RegExp(`<${retTag}>[\\s\\S]*?<\\/${retTag}>`, 'g')
+        let block: RegExpExecArray | null
+        while ((block = blockRe.exec(xml)) !== null) {
+          const blockXml = block[0]
+          let entity: string | undefined
+          for (const tag of entityTags) {
+            const m = blockXml.match(new RegExp(`<${tag}>\\s*<FullName>([^<]+)<\\/FullName>`))
+            if (m?.[1]) {
+              entity = m[1].trim()
+              break
+            }
+          }
+          if (!entity) continue
+          const lineRe = /<(?:ExpenseLineRet|ItemLineRet)>[\s\S]*?<\/(?:ExpenseLineRet|ItemLineRet)>/g
+          let line: RegExpExecArray | null
+          while ((line = lineRe.exec(blockXml)) !== null) {
+            const acct = line[0].match(/<AccountRef>\s*<FullName>([^<]+)<\/FullName>/)
+            if (acct?.[1]) addEntry(entity, acct[1].trim())
+          }
+        }
+      }
+
+      try {
+        const billXml = await qbConnection.sendRequest(listQuery('BillQueryRq'))
+        scanBlocks(billXml, 'BillRet', ['VendorRef'])
+      } catch { /* no bills — non-fatal */ }
+
+      try {
+        const checkXml = await qbConnection.sendRequest(listQuery('CheckQueryRq'))
+        scanBlocks(checkXml, 'CheckRet', ['PayeeEntityRef'])
+      } catch { /* non-fatal */ }
+
+      try {
+        const cccXml = await qbConnection.sendRequest(listQuery('CreditCardChargeQueryRq'))
+        scanBlocks(cccXml, 'CreditCardChargeRet', ['PayeeEntityRef'])
+      } catch { /* non-fatal */ }
+
+      // Deposits: entity + account live together on each DepositLineRet.
+      try {
+        const depXml = await qbConnection.sendRequest(listQuery('DepositQueryRq'))
+        const depBlockRe = /<DepositRet>[\s\S]*?<\/DepositRet>/g
+        let dep: RegExpExecArray | null
+        while ((dep = depBlockRe.exec(depXml)) !== null) {
+          const lineRe = /<DepositLineRet>[\s\S]*?<\/DepositLineRet>/g
+          let line: RegExpExecArray | null
+          while ((line = lineRe.exec(dep[0])) !== null) {
+            const entity = line[0].match(/<EntityRef>\s*<FullName>([^<]+)<\/FullName>/)
+            const acct = line[0].match(/<AccountRef>\s*<FullName>([^<]+)<\/FullName>/)
+            if (entity?.[1] && acct?.[1]) addEntry(entity[1].trim(), acct[1].trim())
+          }
+        }
+      } catch { /* non-fatal */ }
+
+      const vendors: string[] = []
+      const customers: string[] = []
+
+      try {
+        const vendorResp = await qbConnection.sendRequest(buildQBXMLRequest('VendorQueryRq', {}))
+        for (const v of parseQBXMLResponse(vendorResp).list || []) {
+          const name = v['FullName'] || v['Name']
+          if (name) vendors.push(name)
+        }
+      } catch { /* non-fatal */ }
+
+      try {
+        const custResp = await qbConnection.sendRequest(buildQBXMLRequest('CustomerQueryRq', {}))
+        for (const c of parseQBXMLResponse(custResp).list || []) {
+          const name = c['FullName'] || c['Name']
+          if (name) customers.push(name)
+        }
+      } catch { /* non-fatal */ }
+
+      return { success: true, data: { vendors, customers, stats } }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   // Auto-detect QB company file path from the running QB process
   ipcMain.handle('qb:detectCompanyFile', async () => {
     try {

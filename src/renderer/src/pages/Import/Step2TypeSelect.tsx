@@ -17,7 +17,7 @@ import {
 import { TRANSACTION_TYPES, TRANSACTION_CATEGORIES } from '../../data/transactionTypes'
 import type { ImportState } from './index'
 
-const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+const ICON_MAP: Record<string, React.ComponentType<{ size?: number | string; className?: string; style?: React.CSSProperties }>> = {
   FileText,
   Receipt,
   CreditCard,

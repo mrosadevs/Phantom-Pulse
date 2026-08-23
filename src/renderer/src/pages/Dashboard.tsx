@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useMemo, useRef } from 'react'
+import { motion, useMotionValue, useSpring, useTransform, useReducedMotion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
   Upload,
@@ -7,11 +7,8 @@ import {
   Trash2,
   PenLine,
   TrendingUp,
-  CheckCircle2,
   AlertCircle,
   Clock,
-  Wifi,
-  WifiOff,
   FileText,
   ArrowUpRight,
   Activity,
@@ -105,6 +102,14 @@ const QUICK_ACTIONS = [
   }
 ]
 
+function getGreeting(): string {
+  const hour = new Date().getHours()
+  if (hour < 5) return 'Working late'
+  if (hour < 12) return 'Good morning'
+  if (hour < 18) return 'Good afternoon'
+  return 'Good evening'
+}
+
 const stagger = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.07 } }
@@ -139,7 +144,7 @@ export default function Dashboard() {
           <motion.div variants={fadeUp} className="flex items-center justify-between">
             <div>
               <h1 className="font-heading text-[22px] font-bold text-text-primary leading-tight">
-                Dashboard
+                {getGreeting()}
               </h1>
               <p className="text-text-muted text-[13px] mt-0.5">
                 {status.mode === 'qbsdk'
@@ -210,19 +215,25 @@ export default function Dashboard() {
                 ({ label, description, icon: Icon, gradient, border, iconBg, iconColor, arrowColor, path }) => (
                   <motion.button
                     key={label}
-                    whileHover={{ y: -3, scale: 1.015 }}
-                    whileTap={{ scale: 0.97 }}
+                    whileHover={{ y: -4, scale: 1.02 }}
+                    whileTap={{ scale: 0.96 }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 22 }}
                     onClick={() => navigate(path)}
-                    className={`relative overflow-hidden flex flex-col items-start gap-3.5 p-4 rounded-2xl border bg-gradient-to-br ${gradient} ${border} transition-all duration-200 cursor-pointer text-left`}
+                    className={`relative overflow-hidden flex flex-col items-start gap-3.5 p-4 rounded-2xl border bg-gradient-to-br ${gradient} ${border} transition-colors duration-200 cursor-pointer text-left group`}
                   >
-                    <div className={`w-9 h-9 rounded-xl ${iconBg} flex items-center justify-center`}>
+                    {/* Sheen sweep */}
+                    <span className="pointer-events-none absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-out bg-gradient-to-r from-transparent via-white/[0.07] to-transparent" />
+                    <div className={`icon-tile w-9 h-9 ${iconBg}`}>
                       <Icon size={17} className={iconColor} strokeWidth={2} />
                     </div>
                     <div className="flex-1">
                       <p className="font-semibold text-text-primary text-[13px] leading-snug">{label}</p>
                       <p className="text-text-muted text-[11px] mt-0.5 leading-snug">{description}</p>
                     </div>
-                    <ArrowUpRight size={13} className={`${arrowColor} absolute top-3.5 right-3.5 opacity-60`} />
+                    <ArrowUpRight
+                      size={13}
+                      className={`${arrowColor} absolute top-3.5 right-3.5 opacity-60 transition-all duration-300 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5`}
+                    />
                   </motion.button>
                 )
               )}
@@ -363,6 +374,30 @@ export default function Dashboard() {
 
 // ── Sub-components ─────────────────────────────────────────────────────
 
+/** Spring-driven count-up — numbers roll to their value instead of appearing. */
+function AnimatedNumber({ value, zeroColor }: { value: number; zeroColor?: boolean }) {
+  const reduceMotion = useReducedMotion()
+  const motionValue = useMotionValue(0)
+  const spring = useSpring(motionValue, { stiffness: 90, damping: 24, mass: 0.8 })
+  const display = useTransform(spring, (v) => Math.round(v).toLocaleString())
+  const mounted = useRef(false)
+
+  useEffect(() => {
+    if (reduceMotion && !mounted.current) {
+      motionValue.jump(value)
+    } else {
+      motionValue.set(value)
+    }
+    mounted.current = true
+  }, [value, reduceMotion, motionValue])
+
+  return (
+    <motion.span style={{ color: zeroColor && value === 0 ? '#475569' : undefined }}>
+      {display}
+    </motion.span>
+  )
+}
+
 function StatCard({
   label,
   value,
@@ -374,40 +409,52 @@ function StatCard({
   label: string
   value: number
   sub: string
-  icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>
+  icon: React.ComponentType<{ size?: number | string; className?: string; style?: React.CSSProperties }>
   accent: string
   accentAlpha: string
 }) {
   return (
-    <div
-      className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-bg-elevated/70 p-4 hover:border-white/[0.14] transition-all duration-200 group"
+    <motion.div
+      whileHover={{ y: -3 }}
+      transition={{ type: 'spring', stiffness: 320, damping: 22 }}
+      className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-bg-elevated/60 backdrop-blur-md p-4 transition-colors duration-300 group"
       style={{ boxShadow: `inset 0 1px 0 ${accentAlpha}0.12)` }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLElement).style.borderColor = `${accentAlpha}0.35)`
+        ;(e.currentTarget as HTMLElement).style.boxShadow = `inset 0 1px 0 ${accentAlpha}0.18), 0 12px 30px -12px rgba(0,0,0,0.5), 0 0 24px -8px ${accentAlpha}0.35)`
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLElement).style.borderColor = ''
+        ;(e.currentTarget as HTMLElement).style.boxShadow = `inset 0 1px 0 ${accentAlpha}0.12)`
+      }}
     >
-      {/* Subtle top accent line */}
+      {/* Top accent line brightens on hover */}
       <div
-        className="absolute top-0 left-4 right-4 h-[1.5px] rounded-b-full"
-        style={{ background: `linear-gradient(90deg, transparent, ${accent}90, transparent)` }}
+        className="absolute top-0 left-4 right-4 h-[1.5px] rounded-b-full opacity-80 group-hover:opacity-100 group-hover:left-1 group-hover:right-1 transition-all duration-300"
+        style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }}
+      />
+      {/* Soft corner glow */}
+      <div
+        className="absolute -top-10 -right-10 w-24 h-24 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
+        style={{ background: `radial-gradient(circle, ${accentAlpha}0.22), transparent 70%)` }}
       />
 
       <div className="flex items-start justify-between">
         <div className="min-w-0">
           <p className="text-[11px] font-medium text-text-muted uppercase tracking-wider">{label}</p>
-          <p
-            className="text-[28px] font-bold mt-1.5 leading-none font-heading"
-            style={{ color: value === 0 ? '#475569' : '#F8FAFC' }}
-          >
-            {value.toLocaleString()}
+          <p className="text-[28px] font-bold mt-1.5 leading-none font-heading text-text-primary tabular-nums">
+            <AnimatedNumber value={value} zeroColor />
           </p>
           <p className="text-[11px] text-text-muted mt-1.5">{sub}</p>
         </div>
         <div
-          className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+          className="icon-tile w-9 h-9 flex-shrink-0"
           style={{ background: `${accentAlpha}0.12)` }}
         >
           <Icon size={17} style={{ color: accent }} />
         </div>
       </div>
-    </div>
+    </motion.div>
   )
 }
 

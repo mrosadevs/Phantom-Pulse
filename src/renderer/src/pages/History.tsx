@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { History, Upload, Download, Trash2, PenLine, Clock, Wifi, FileText, RefreshCw, AlertCircle } from 'lucide-react'
+import EmptyState from '../components/ui/EmptyState'
 import { toast } from 'sonner'
 import { useHistoryStore } from '../store/useHistoryStore'
 import type { HistoryEntry } from '../types/electron'
@@ -80,13 +81,12 @@ export default function HistoryPage() {
         {/* History table */}
         <div className="flex-1 glass-card overflow-hidden flex flex-col">
           {entries.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-muted">
-              <History size={40} className="text-text-disabled" />
-              <p className="text-sm font-medium">No operations recorded yet</p>
-              <p className="text-text-disabled text-xs">
-                Import, export, or delete transactions to see history here
-              </p>
-            </div>
+            <EmptyState
+              className="flex-1"
+              icon={History}
+              title="No operations recorded yet"
+              description="Every import, export, modification, and deletion you run will be logged here with its success and failure counts."
+            />
           ) : (
             <>
               {/* Table header */}

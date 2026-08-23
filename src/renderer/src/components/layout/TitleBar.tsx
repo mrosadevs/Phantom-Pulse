@@ -1,4 +1,5 @@
 import { Minus, Square, X, Zap, Sun, Moon } from 'lucide-react'
+import { motion } from 'framer-motion'
 import { useAppStore } from '../../store/useAppStore'
 import { useEffect, useState } from 'react'
 
@@ -11,13 +12,24 @@ export default function TitleBar() {
   }, [])
 
   return (
-    <div className="drag-region h-9 flex items-center justify-between px-4 bg-bg-surface/80 border-b border-white/[0.06] flex-shrink-0 backdrop-blur-sm">
+    <div className="drag-region h-9 flex items-center justify-between px-4 bg-bg-surface/70 border-b border-white/[0.06] flex-shrink-0 backdrop-blur-xl relative z-20">
       {/* App name/logo */}
       <div className="no-drag flex items-center gap-2">
-        <div className="w-6 h-6 rounded-lg bg-gradient-primary flex items-center justify-center shadow-glow-sm">
+        <motion.div
+          animate={{
+            boxShadow: [
+              '0 0 8px rgba(99,102,241,0.35)',
+              '0 0 16px rgba(139,92,246,0.55)',
+              '0 0 8px rgba(99,102,241,0.35)'
+            ]
+          }}
+          transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
+          whileHover={{ scale: 1.15, rotate: -8 }}
+          className="w-6 h-6 rounded-lg bg-gradient-primary flex items-center justify-center"
+        >
           <Zap size={12} className="text-white" strokeWidth={2.5} />
-        </div>
-        <span className="font-heading font-semibold text-[13px] text-text-primary tracking-wide">
+        </motion.div>
+        <span className="font-heading font-semibold text-[13px] tracking-wide gradient-text">
           Phantom Pulse
         </span>
         <span className="text-text-disabled text-[11px] font-normal">for QuickBooks Desktop</span>

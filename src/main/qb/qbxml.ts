@@ -449,6 +449,38 @@ export function buildCreditCardChargeAddXML(
 ${QBXML_FOOTER}`
 }
 
+/**
+ * CreditCardCreditAdd  — QB schema order (same as CreditCardChargeAdd):
+ * AccountRef (CC account), PayeeEntityRef, TxnDate,
+ * RefNumber, Memo, ExpenseLineAdd+
+ *
+ * Used for payments/refunds on a credit card account — the mirror of a charge.
+ */
+export function buildCreditCardCreditAddXML(
+  ccc: Record<string, string>,
+  requestId: string
+): string {
+  const expenseAccount = ccc['Expense Account'] || ''
+  const lineContent = x(
+    optRef('AccountRef', expenseAccount),
+    opt('Amount', ccc['Amount'] && ccc['Amount'] !== '0' ? amt(ccc['Amount']) : ''),
+    opt('Memo', ccc['Memo'])
+  )
+
+  return `${QBXML_HEADER}
+    <CreditCardCreditAddRq requestID="${requestId}">
+      <CreditCardCreditAdd>${x(
+        elRef('AccountRef', ccc['Account'] || ''),
+        optRef('PayeeEntityRef', ccc['Vendor']),
+        txnDateEl(ccc['Date'] || ccc['TxnDate']),
+        opt('RefNumber', ccc['RefNumber']),
+        opt('Memo', ccc['Memo']),
+        lineContent ? `<ExpenseLineAdd>${lineContent}</ExpenseLineAdd>` : ''
+      )}</CreditCardCreditAdd>
+    </CreditCardCreditAddRq>
+${QBXML_FOOTER}`
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Banking Transactions
 // ─────────────────────────────────────────────────────────────────────────────
