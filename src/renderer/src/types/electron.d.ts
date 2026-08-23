@@ -77,6 +77,24 @@ export interface HistoryEntry {
   mode: 'qbsdk' | 'iif'
 }
 
+export interface UpdaterStatusPayload {
+  status: 'checking' | 'up-to-date' | 'available' | 'downloaded' | 'error'
+  version?: string
+  error?: string
+  /** True when auto-update is on and the download already started. */
+  auto?: boolean
+}
+
+export interface LicenseStatus {
+  activated: boolean
+  machineId: string
+  name?: string
+  issued?: string
+  expires?: string | null
+  /** Set when a previously stored key no longer verifies. */
+  reason?: string
+}
+
 declare global {
   interface Window {
     api: {
@@ -207,8 +225,23 @@ declare global {
       }
       updater: {
         check: () => Promise<{ success?: boolean; error?: string }>
+        /** Start the download after the user accepts the prompt (ask mode). */
+        download: () => Promise<{ success?: boolean; error?: string }>
         install: () => void
         getVersion: () => Promise<string>
+        getAuto: () => Promise<boolean>
+        setAuto: (value: boolean) => Promise<{ success: boolean }>
+        /** Both return an unsubscribe function — call it on unmount. */
+        onStatus: (cb: (data: UpdaterStatusPayload) => void) => () => void
+        onProgress: (cb: (data: { percent: number }) => void) => () => void
+      }
+      license: {
+        status: () => Promise<LicenseStatus>
+        machineId: () => Promise<string>
+        activate: (
+          key: string
+        ) => Promise<{ success: boolean; error?: string; status?: LicenseStatus }>
+        deactivate: () => Promise<{ success: boolean }>
       }
     }
   }

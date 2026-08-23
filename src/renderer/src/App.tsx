@@ -10,10 +10,14 @@ import HistoryPage from './pages/History'
 import SettingsPage from './pages/Settings'
 import GLImportPage from './pages/GLImport'
 import LedgerPage from './pages/Ledger'
+import LicenseGate from './components/LicenseGate'
+import UpdatePrompt from './components/UpdatePrompt'
 
 export default function App() {
   return (
-    <HashRouter>
+    <>
+      {/* Outside the gate: the activation screen raises toasts of its own, so
+          the Toaster has to be mounted before the app is unlocked. */}
       <Toaster
         theme="dark"
         position="top-right"
@@ -25,20 +29,25 @@ export default function App() {
           }
         }}
       />
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="import" element={<ImportWizard />} />
-          <Route path="export" element={<ExportPage />} />
-          <Route path="delete" element={<DeletePage />} />
-          <Route path="modify" element={<ModifyPage />} />
-          <Route path="history" element={<HistoryPage />} />
-          <Route path="gl-import" element={<GLImportPage />} />
-          <Route path="ledger" element={<LedgerPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-        </Route>
-      </Routes>
-    </HashRouter>
+      <LicenseGate>
+        <HashRouter>
+          <UpdatePrompt />
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="import" element={<ImportWizard />} />
+              <Route path="export" element={<ExportPage />} />
+              <Route path="delete" element={<DeletePage />} />
+              <Route path="modify" element={<ModifyPage />} />
+              <Route path="history" element={<HistoryPage />} />
+              <Route path="gl-import" element={<GLImportPage />} />
+              <Route path="ledger" element={<LedgerPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+            </Route>
+          </Routes>
+        </HashRouter>
+      </LicenseGate>
+    </>
   )
 }

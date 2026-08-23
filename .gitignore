@@ -6,3 +6,5 @@ nul
 .DS_Store
 Thumbs.db
 *.tsbuildinfo
+keys/
+*.pem

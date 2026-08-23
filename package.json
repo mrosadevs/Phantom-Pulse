@@ -9,7 +9,13 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "package": "npm run build && electron-builder"
+    "package": "npm run build && electron-builder",
+    "release": "npm run build && electron-builder --publish always",
+    "gen-keypair": "node scripts/gen-keypair.mjs",
+    "gen-key": "node scripts/gen-key.mjs",
+    "machine-id": "node scripts/show-machine-id.mjs",
+    "make-icon": "node scripts/make-icon.mjs",
+    "test:license": "node scripts/test-license.mjs"
   },
   "dependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
@@ -52,7 +58,16 @@
     "productName": "Phantom Pulse",
     "win": {
       "target": "nsis",
-      "icon": "resources/icon.ico"
+      "icon": "resources/icon.ico",
+      "artifactName": "Phantom-Pulse-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Phantom Pulse"
     },
     "publish": {
       "provider": "github",

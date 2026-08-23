@@ -16,10 +16,12 @@ import {
   RefreshCw,
   Download,
   Sparkles,
-  Tag
+  Tag,
+  KeyRound
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useQBStore } from '../store/useQBStore'
+import type { LicenseStatus } from '../types/electron'
 
 type UpdateStatus =
   | 'idle'
@@ -46,13 +48,18 @@ export default function SettingsPage() {
   const [updateVersion, setUpdateVersion] = useState<string>('')
   const [downloadPercent, setDownloadPercent] = useState(0)
   const [updateError, setUpdateError] = useState<string>('')
+  const [autoUpdate, setAutoUpdate] = useState(false)
+
+  // Licence
+  const [license, setLicense] = useState<LicenseStatus | null>(null)
 
   // Persist path whenever it changes
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, companyFile)
   }, [companyFile])
 
-  // Listen for progress updates from the worker thread
+  // qb:connectProgress goes through the generic bridge, which has no way to
+  // remove a listener — so guard against StrictMode's double-mount.
   useEffect(() => {
     if (listenerRef.current) return
     listenerRef.current = true
@@ -62,35 +69,51 @@ export default function SettingsPage() {
       electronOn('qb:connectProgress', (_: unknown, data: { step: string; detail: string }) => {
         setConnectStep(data.detail ?? data.step)
       })
-      electronOn(
-        'updater:status',
-        (
-          _: unknown,
-          data: { status: UpdateStatus; version?: string; error?: string }
-        ) => {
-          setUpdateStatus(data.status)
-          if (data.version) setUpdateVersion(data.version)
-          if (data.error) setUpdateError(data.error)
-          if (data.status === 'available') {
-            toast.info(`Update v${data.version} is available — downloading…`)
-          } else if (data.status === 'downloaded') {
-            toast.success(`v${data.version} downloaded — restart to install.`)
-          } else if (data.status === 'error') {
-            toast.error(`Update error: ${data.error}`)
-          }
-        }
-      )
-      electronOn('updater:progress', (_: unknown, data: { percent: number }) => {
-        setUpdateStatus('downloading')
-        setDownloadPercent(data.percent)
-      })
+    }
+  }, [])
+
+  // Updater events do unsubscribe, so they can be registered normally.
+  useEffect(() => {
+    const offStatus = window.api.updater.onStatus((data) => {
+      setUpdateStatus(data.status)
+      if (data.version) setUpdateVersion(data.version)
+      if (data.error) setUpdateError(data.error)
+      if (data.status === 'available') {
+        toast.info(
+          data.auto
+            ? `Update v${data.version} is available — downloading…`
+            : `Update v${data.version} is available.`
+        )
+      } else if (data.status === 'downloaded') {
+        toast.success(`v${data.version} downloaded — restart to install.`)
+      } else if (data.status === 'error') {
+        toast.error(`Update error: ${data.error}`)
+      }
+    })
+    const offProgress = window.api.updater.onProgress((data) => {
+      setUpdateStatus('downloading')
+      setDownloadPercent(data.percent)
+    })
+    return () => {
+      offStatus()
+      offProgress()
     }
   }, [])
 
   // Fetch current app version on mount
   useEffect(() => {
     window.api.updater.getVersion().then(setAppVersion).catch(() => {})
+    window.api.updater.getAuto().then(setAutoUpdate).catch(() => {})
+    window.api.license.status().then(setLicense).catch(() => {})
   }, [])
+
+  const handleToggleAutoUpdate = async (next: boolean) => {
+    setAutoUpdate(next)
+    await window.api.updater.setAuto(next)
+    toast.success(
+      next ? 'Updates will install automatically.' : "You'll be asked before each update."
+    )
+  }
 
   const setPath = (raw: string) => {
     setCompanyFile(raw.replace(/^"|"$/g, '').trim())
@@ -658,10 +681,78 @@ export default function SettingsPage() {
             )}
           </div>
 
+          {/* Auto-update preference */}
+          <div className="flex items-center justify-between p-4 rounded-xl bg-bg-surface/60 border border-border-subtle">
+            <div className="pr-4">
+              <p className="text-text-secondary text-sm font-medium">Install updates automatically</p>
+              <p className="text-text-muted text-xs mt-0.5 leading-relaxed">
+                {autoUpdate
+                  ? 'Updates download in the background and install when you quit.'
+                  : "Phantom Pulse checks on launch and asks before downloading anything."}
+              </p>
+            </div>
+            <button
+              role="switch"
+              aria-checked={autoUpdate}
+              onClick={() => handleToggleAutoUpdate(!autoUpdate)}
+              className={`relative w-11 h-6 rounded-full flex-shrink-0 transition-colors ${
+                autoUpdate ? 'bg-primary' : 'bg-bg-elevated border border-border-subtle'
+              }`}
+            >
+              <motion.span
+                layout
+                transition={{ type: 'spring', stiffness: 500, damping: 32 }}
+                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white shadow-sm"
+                style={{ left: autoUpdate ? 'calc(100% - 1.25rem)' : '0.25rem' }}
+              />
+            </button>
+          </div>
+
           <p className="text-text-disabled text-xs">
-            Updates are downloaded automatically in the background. You'll be notified when a new
-            version is ready to install.
+            Updates are published as GitHub Releases — a new version appears here once a release
+            is out, not on every code change.
           </p>
+        </div>
+      </motion.div>
+
+      {/* ─── Licence ─────────────────────────────────────────────────────── */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, delay: 0.05 }}
+        className="card p-6"
+      >
+        <div className="flex items-center gap-2 mb-5">
+          <KeyRound size={18} className="text-primary" />
+          <h2 className="font-heading text-base font-semibold text-text-primary">Licence</h2>
+        </div>
+
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-text-muted mb-1">
+                Registered to
+              </p>
+              <p className="text-text-secondary text-sm">{license?.name ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-text-muted mb-1">Expires</p>
+              <p className="text-text-secondary text-sm">
+                {license?.expires ? license.expires : 'Never'}
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[11px] uppercase tracking-wide text-text-muted mb-1">Machine ID</p>
+            <code className="block px-3 py-2 rounded-lg bg-bg-surface border border-border-subtle font-mono text-[12.5px] text-text-secondary tracking-wider">
+              {license?.machineId ?? '—'}
+            </code>
+            <p className="text-text-disabled text-xs mt-2 leading-relaxed">
+              This licence is tied to this machine. Reinstalling Windows changes the machine ID
+              and needs a new key.
+            </p>
+          </div>
         </div>
       </motion.div>
     </div>

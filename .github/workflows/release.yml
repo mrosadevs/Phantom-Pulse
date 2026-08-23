@@ -1,0 +1,36 @@
+name: Release
+
+# Publishes a Windows installer to GitHub Releases whenever a version tag is
+# pushed.  This is what makes an update appear in the app — pushing to main
+# does nothing on its own, because electron-updater reads Releases, not commits.
+#
+#   npm version patch      # bumps package.json and creates the tag
+#   git push --follow-tags # triggers this workflow
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and publish
+        env:
+          # Provided automatically; needs the contents:write permission above.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release

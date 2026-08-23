@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+interface UpdaterStatus {
+  status: 'checking' | 'up-to-date' | 'available' | 'downloaded' | 'error'
+  version?: string
+  error?: string
+  /** True when the update is already downloading because auto-update is on. */
+  auto?: boolean
+}
+
 // Expose protected methods under the `window.api` namespace
 contextBridge.exposeInMainWorld('api', {
   // Window controls
@@ -68,8 +76,33 @@ contextBridge.exposeInMainWorld('api', {
   // Auto-updater
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
+    download: () => ipcRenderer.invoke('updater:download'),
     install: () => ipcRenderer.send('updater:install'),
-    getVersion: () => ipcRenderer.invoke('updater:getVersion')
+    getVersion: () => ipcRenderer.invoke('updater:getVersion'),
+    getAuto: () => ipcRenderer.invoke('updater:getAuto'),
+    setAuto: (value: boolean) => ipcRenderer.invoke('updater:setAuto', value),
+
+    // Each returns an unsubscribe function.  The generic `electronOn` below has
+    // no way to remove a listener, so components using it leak one per mount —
+    // under React StrictMode that is two listeners per mount in dev.
+    onStatus: (cb: (data: UpdaterStatus) => void) => {
+      const handler = (_e: unknown, data: UpdaterStatus): void => cb(data)
+      ipcRenderer.on('updater:status', handler)
+      return () => ipcRenderer.removeListener('updater:status', handler)
+    },
+    onProgress: (cb: (data: { percent: number }) => void) => {
+      const handler = (_e: unknown, data: { percent: number }): void => cb(data)
+      ipcRenderer.on('updater:progress', handler)
+      return () => ipcRenderer.removeListener('updater:progress', handler)
+    }
+  },
+
+  // Licence activation
+  license: {
+    status: () => ipcRenderer.invoke('license:status'),
+    machineId: () => ipcRenderer.invoke('license:machineId'),
+    activate: (key: string) => ipcRenderer.invoke('license:activate', key),
+    deactivate: () => ipcRenderer.invoke('license:deactivate')
   }
 })
 
