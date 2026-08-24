@@ -9,12 +9,24 @@ import { registerLicenseHandlers } from './ipc/license'
 
 const settings = new Store({ name: 'settings' })
 
-// Fix GPU process crash (exit_code=-1) on some AMD/Windows configurations
-// Must be called before app ready event
-app.disableHardwareAcceleration()
-app.commandLine.appendSwitch('disable-gpu')
-app.commandLine.appendSwitch('disable-gpu-sandbox')
-app.commandLine.appendSwitch('no-sandbox')
+// GPU acceleration was previously switched off wholesale to dodge a GPU
+// process crash (exit_code=-1) on AMD/Windows setups.  That worked, but it
+// pushed every backdrop-blur, gradient and framer-motion animation onto the
+// CPU, which is what made the UI feel sluggish.
+//
+// On a laptop/desktop with both an integrated AMD GPU and a discrete card,
+// the crash comes from Chromium picking the integrated one.  Asking for the
+// high-performance adapter fixes the crash while keeping acceleration.
+//
+// If the GPU process starts crashing again on another machine, set
+// PHANTOM_PULSE_DISABLE_GPU=1 rather than reaching for the old blanket switch.
+if (process.env.PHANTOM_PULSE_DISABLE_GPU === '1') {
+  app.disableHardwareAcceleration()
+  app.commandLine.appendSwitch('disable-gpu')
+  app.commandLine.appendSwitch('disable-gpu-sandbox')
+} else {
+  app.commandLine.appendSwitch('force_high_performance_gpu')
+}
 
 let mainWindow: BrowserWindow | null = null
 
