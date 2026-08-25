@@ -18,11 +18,12 @@
     "test:license": "node scripts/test-license.mjs"
   },
   "dependencies": {
+    "@accuracy/statement-parser": "file:../phantom-statement-parser",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron-toolkit/utils": "^4.0.0",
-    "electron-updater": "^6.3.9",
     "@tanstack/react-table": "^8.17.3",
     "electron-store": "^8.2.0",
+    "electron-updater": "^6.3.9",
     "framer-motion": "^11.3.19",
     "lucide-react": "^0.447.0",
     "papaparse": "^5.4.1",
