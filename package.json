@@ -18,7 +18,7 @@
     "test:license": "node scripts/test-license.mjs"
   },
   "dependencies": {
-    "@accuracy/statement-parser": "github:mrosadevs/phantom-statement-parser#v1.0.1",
+    "@accuracy/statement-parser": "github:mrosadevs/phantom-statement-parser#v1.1.1",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron-toolkit/utils": "^4.0.0",
     "@tanstack/react-table": "^8.17.3",
@@ -33,6 +33,7 @@
     "react-router-dom": "^6.26.2",
     "recharts": "^2.12.7",
     "sonner": "^1.5.0",
+    "tesseract.js": "^7.0.0",
     "winax": "^3.6.5",
     "xlsx": "^0.18.5",
     "zustand": "^4.5.5"

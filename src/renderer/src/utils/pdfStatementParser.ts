@@ -21,6 +21,7 @@ import {
   createStatementParser,
   findBatchWarnings as findBatchWarningsShared
 } from '@accuracy/statement-parser'
+import { ocrDocumentPages } from './statementOcr'
 import type {
   ParsedPdfResult as SharedResult,
   AccountType,
@@ -86,15 +87,68 @@ function flatten(result: SharedResult, fileName: string, sha256: string): Parsed
   }
 }
 
+/**
+ * Read a statement that has no text layer at all.
+ *
+ * Citizens ships scans: zero text items, nothing to parse. Rendering each page
+ * and recognising it produces the same { str, x, y, width } items pdfjs would
+ * have, so the result goes through the shared parser's own sectioning, sign and
+ * validation logic. An OCR'd statement still has to reconcile against its own
+ * printed totals — it is reported as failing, never quietly trusted.
+ */
+async function parseScannedPdf(
+  data: Uint8Array,
+  fileName: string,
+  options: { accountType?: AccountTypeOption },
+  onProgress?: OcrProgress
+): Promise<SharedResult> {
+  const document = await pdfjsLib.getDocument({ data, isEvalSupported: false }).promise
+  try {
+    const pages = await ocrDocumentPages(document, (page, pageCount) =>
+      onProgress?.({ fileName, page, pageCount })
+    )
+    const result = parser.extractTransactionsFromItems(pages, fileName, options)
+    return {
+      ...result,
+      warnings: [
+        `${fileName} has no text layer and was read by OCR — check the figures against the statement.`,
+        ...result.warnings
+      ]
+    }
+  } finally {
+    await document.destroy()
+  }
+}
+
+export interface OcrProgressEvent {
+  fileName: string
+  page: number
+  pageCount: number
+}
+
+export type OcrProgress = (event: OcrProgressEvent) => void
+
 export async function parseStatementPdfsWithMeta(
   files: File[],
-  options: { accountType?: AccountTypeOption } = {}
+  options: { accountType?: AccountTypeOption; onOcrProgress?: OcrProgress } = {}
 ): Promise<ParsedPdfResult[]> {
+  const { onOcrProgress, ...parseOptions } = options
   const results: ParsedPdfResult[] = []
   for (const file of files) {
     const buf = await file.arrayBuffer()
     const sha256 = await computeSha256(buf)
-    const result = await parser.extractTransactionsFromPdf(new Uint8Array(buf), file.name, options)
+    const data = new Uint8Array(buf)
+
+    let result: SharedResult
+    try {
+      result = await parser.extractTransactionsFromPdf(data, file.name, parseOptions)
+    } catch (error) {
+      // The parser refuses a PDF it found no text in rather than returning an
+      // empty statement; that refusal is what tells us to fall back to OCR.
+      if ((error as { code?: string })?.code !== 'IMAGE_BASED') throw error
+      result = await parseScannedPdf(data, file.name, parseOptions, onOcrProgress)
+    }
+
     results.push(flatten(result, file.name, sha256))
   }
   return results
