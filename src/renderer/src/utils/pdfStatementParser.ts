@@ -107,7 +107,12 @@ async function parseScannedPdf(
     const pages = await ocrDocumentPages(document, (page, pageCount) =>
       onProgress?.({ fileName, page, pageCount })
     )
-    const result = parser.extractTransactionsFromItems(pages, fileName, options)
+    const result = parser.extractTransactionsFromItems(pages, fileName, {
+      ...options,
+      // OCR estimates a baseline per word, so a row of text drifts a point or
+      // two where a PDF text layer would not. Rows sit 11pt or more apart.
+      lineTolerance: 4.5
+    })
     return {
       ...result,
       warnings: [
