@@ -40,16 +40,53 @@ const MOCK_ACCOUNTS = [
   { Name: 'Ask My Accountant', FullName: 'Ask My Accountant', AccountType: 'OtherExpense' }
 ]
 
+// Mirrors qb:getEntityAccountStats. `stats` counts transactions and
+// `signatures` records the account set of each one.  Ally Bank Loan is the
+// recurring-split case (principal + interest on every payment): consistent
+// coding, but one statement line cannot be assigned to one side of it, so it
+// goes to Ask My Accountant carrying the breakdown.  The Home Depot is the
+// other reason to hold back — the same payee coded differently month to month.
 const MOCK_STATS = {
-  vendors: ['Pilot Travel Centers', 'The Home Depot', 'FPL Direct', 'Barclaycard US'],
+  vendors: ['Pilot Travel Centers', 'The Home Depot', 'FPL Direct', 'Barclaycard US', 'Ally Bank Loan'],
   customers: ['ACME Logistics', 'Sunbelt Produce'],
   stats: {
     'Pilot Travel Centers': { 'Fuel Expense': 48 },
     'The Home Depot': { 'Repairs & Maintenance': 9, 'Shareholder Distributions': 5 },
     'FPL Direct': { Utilities: 12 },
+    'Ally Bank Loan': { 'Interest Expense': 12, 'Loan Payable': 12 },
     'ACME Logistics': { 'Trucking Income': 22 },
     'Sunbelt Produce': { 'Trucking Income': 7 }
-  }
+  },
+  amounts: {
+    'Pilot Travel Centers': { 'Fuel Expense': 21400 },
+    'The Home Depot': { 'Repairs & Maintenance': 4300, 'Shareholder Distributions': 2600 },
+    'FPL Direct': { Utilities: 3900 },
+    'Ally Bank Loan': { 'Interest Expense': 3600, 'Loan Payable': 10800 },
+    'ACME Logistics': { 'Trucking Income': 88000 },
+    'Sunbelt Produce': { 'Trucking Income': 24500 }
+  },
+  signatures: {
+    'Pilot Travel Centers': { 'Fuel Expense': 48 },
+    'The Home Depot': { 'Repairs & Maintenance': 9, 'Shareholder Distributions': 5 },
+    'FPL Direct': { Utilities: 12 },
+    'Ally Bank Loan': { 'Interest Expense || Loan Payable': 12 },
+    'ACME Logistics': { 'Trucking Income': 22 },
+    'Sunbelt Produce': { 'Trucking Income': 7 }
+  },
+  txnCounts: {
+    'Pilot Travel Centers': 48,
+    'The Home Depot': 14,
+    'FPL Direct': 12,
+    'Ally Bank Loan': 12,
+    'ACME Logistics': 22,
+    'Sunbelt Produce': 7
+  },
+  diagnostics: [
+    { query: 'BillQueryRq', statusCode: '0', statusSeverity: 'Info', statusMessage: 'Status OK',
+      pages: 1, transactions: 64, entries: 71, truncated: false, variant: 0 },
+    { query: 'CheckQueryRq', statusCode: '0', statusSeverity: 'Info', statusMessage: 'Status OK',
+      pages: 1, transactions: 52, entries: 66, truncated: false, variant: 0 }
+  ]
 }
 
 const ok = <T extends object>(data: T) => Promise.resolve({ success: true, ...data })

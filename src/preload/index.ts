@@ -62,8 +62,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('qb:importGLEntities', entities),
     getVendorAccountMap: () =>
       ipcRenderer.invoke('qb:getVendorAccountMap'),
-    getEntityAccountStats: () =>
-      ipcRenderer.invoke('qb:getEntityAccountStats')
+    getEntityAccountStats: (options?: { lookbackYears?: number }) =>
+      ipcRenderer.invoke('qb:getEntityAccountStats', options)
   },
 
   // History/store operations

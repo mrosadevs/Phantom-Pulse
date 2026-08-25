@@ -196,8 +196,13 @@ function stripCardNoise(s: string): string {
     .replace(/\s+[A-Z][a-zA-Z]+\s+[A-Z]{2}\s*$/, '')
     .replace(/\s+[A-Z]{2}\s*$/, '')
     .replace(/\s+\S+\.com\b/gi, '')
+    // Merchant phone numbers ride along on card purchases: "Solaris Pools
+    // 954-7565162", "Cty Fort Lauderdal 954-828-5150".  The digit rule below
+    // misses them because of the dashes.
+    .replace(/\s+\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{3,5}\b/g, '')
     .replace(/\s+#?\d{4,}/g, '')
-    .replace(/^[A-Za-z]{2,4}\*/i, '')
+    // Acquirer prefixes: "SQ *", "TST*", "IN *Solaris Pools"
+    .replace(/^[A-Za-z]{2,4}\s*\*\s*/i, '')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -218,8 +223,18 @@ function titleCase(s: string): string {
 
 // ── Main cleaner ──────────────────────────────────────────────────────────────
 
-export function cleanTransaction(raw: string): string {
+export interface CleanOptions {
+  /**
+   * Apply the merchant normalization map ("FPL DIRECT DEBIT" → "Florida Power
+   * & Light").  Turn it off to get the spelling the bank actually printed,
+   * which is what a QuickBooks file that calls the vendor "FPL" will match.
+   */
+  normalize?: boolean
+}
+
+export function cleanTransaction(raw: string, options: CleanOptions = {}): string {
   if (!raw || raw.trim().length === 0) return raw
+  const normalize = options.normalize !== false
 
   const m = raw.trim()
 
@@ -399,6 +414,20 @@ export function cleanTransaction(raw: string): string {
     return titleCase(m.replace(/^Zelle to /i, '').replace(/\s+Ref\s+#\S+.*/i, '').trim())
   }
 
+  // ── Zelle From/To <name> … (no "Payment", and often a free-text memo tacked
+  // on the end: "Zelle From Christine Taylor on 03/12 Ref # Ctz01Zf2Hn5C One
+  // Month Security 5195 NE 18th Ave").  Everything from the first "on MM/DD",
+  // "Ref #", "Conf#" or long reference number onward is the bank's, not the
+  // payee's — cut there or the name never matches the QuickBooks record.
+  if (/^Zelle\s+(?:from|to)\s+/i.test(m)) {
+    const name = m
+      .replace(/^Zelle\s+(?:from|to)\s+/i, '')
+      .split(/\s+on\s+\d{1,2}\/\d{1,2}|\s+Ref\s*#|\s+Conf\s*#|\s+for\s+"/i)[0]
+      .replace(/\s+\d{8,}.*$/, '')
+      .trim()
+    if (name) return titleCase(stripBankCodes(name))
+  }
+
   // ── Zelle Payment From (old capitalized format) ──
   if (m.startsWith('Zelle Payment From ')) {
     let name = m.replace(/^Zelle Payment From /, '')
@@ -454,26 +483,37 @@ export function cleanTransaction(raw: string): string {
     return 'Mobile Transfer'
   }
 
-  // ── Online Transfer to <account name> ──
-  if (m.startsWith('Online Transfer to ')) {
-    let rest = m.replace(/^Online Transfer to /, '')
+  // ── Online Transfer to/from <account name> ──
+  // The counterparty is the payee.  Prefixing it with "Transfer to" put a word
+  // in front of the name that no QuickBooks record starts with, so "Online
+  // Transfer to Multiservicios Roraima 93 LLC" never matched the vendor of
+  // exactly that name.  Return the bare name.
+  if (/^Online Transfer (?:to|from) /i.test(m)) {
+    let rest = m.replace(/^Online Transfer (?:to|from) /i, '')
     rest = rest.replace(/\s+(?:Everyday|Business|Savings|Personal)\s+(?:Checking|Savings).*/i, '')
     rest = rest.replace(/\s+xxxxxx\d+.*/i, '')
     rest = rest.replace(/\s+Ref\s+#.*/i, '')
-    return titleCase('Transfer to ' + rest.trim())
+    rest = rest.replace(/\s+on\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/i, '')
+    if (rest.trim()) return titleCase(rest.trim())
   }
 
   // ── Online Transfer To Chk (old format) ──
   if (/^Online Transfer To Chk/i.test(m)) return 'Online Transfer'
 
   // ── Orig CO Name: <name> CO Entry Descr: <descr> ──
+  // "Orig CO Name" is the originating company — the payee.  "CO Entry Descr"
+  // is what the payment was for, and on real ACH lines it is usually a stub
+  // like "Chckng" or "Bill Pay", which is how "Orig CO Name:Panzarella Waste …
+  // CO Entry Descr:Chckng" used to clean down to "Chckng".  Take the company
+  // name and fall back to the description only when there isn't one.
   if (m.startsWith('Orig CO Name:')) {
+    const co = m.match(/Orig CO Name:(.+?)\s+Orig\s+ID:/i)
+    if (co?.[1]?.trim()) return titleCase(co[1].trim())
+
     const descr = m.match(/CO Entry Descr:(\w+)/i)
     if (descr && !['ACH', 'PMT', 'ACHPMT'].includes(descr[1].toUpperCase())) {
       return titleCase(descr[1])
     }
-    const co = m.match(/Orig CO Name:(.+?)\s+Orig\s+ID:/i)
-    if (co) return titleCase(co[1].trim())
     return m
   }
 
@@ -495,9 +535,19 @@ export function cleanTransaction(raw: string): string {
     if (rest.trim()) return titleCase(rest.trim())
   }
 
+  // ── [Recurring] Card Purchase [With Pin] MM/DD <merchant> <city> <ST> Card #### ──
+  const cardPurchase = m.match(
+    /^(?:Recurring\s+)?Card Purchase(?:\s+With\s+Pin)?\s+\d{1,2}\/\d{1,2}\s+(.+)$/i
+  )
+  if (cardPurchase) {
+    const merchant = stripCardNoise(cardPurchase[1])
+    if (merchant) return titleCase(merchant)
+  }
+
   // ── Purchase authorized on / Recurring Payment authorized on / Purchase Intl ──
   for (const prefix of [
     'Purchase authorized on ',
+    'Purchase Return authorized on ',
     'Recurring Payment authorized on ',
     'Purchase Intl authorized on '
   ]) {
@@ -509,7 +559,9 @@ export function cleanTransaction(raw: string): string {
       rest = rest.replace(/\s+[A-Z]{2}$/, '')
       rest = rest.replace(/\s+\S+@\S+/, '')
       rest = rest.replace(/\s+Https?:\/\/\S+/i, '')
-      return titleCase(rest.trim())
+      // Card lines carry the acquirer prefix and the merchant's phone number
+      // ("IN *Solaris Pools 954-7565162"); both block the name match.
+      return titleCase(stripCardNoise(rest.trim()))
     }
   }
 
@@ -664,8 +716,10 @@ export function cleanTransaction(raw: string): string {
 
   // ── Generic: apply normalization map then return ──
   const cleaned = stripCardNoise(m)
-  const normalized = applyNormalizationMap(cleaned)
-  if (normalized !== cleaned) return normalized
+  if (normalize) {
+    const normalized = applyNormalizationMap(cleaned)
+    if (normalized !== cleaned) return normalized
+  }
 
   return titleCase(cleaned)
 }
@@ -684,4 +738,24 @@ export function applyNormalizationMap(name: string): string {
 export function cleanAndNormalizeTransaction(raw: string): string {
   const cleaned = cleanTransaction(raw)
   return applyNormalizationMap(cleaned)
+}
+
+/**
+ * Payee spellings to try against the QuickBooks catalog, best first.
+ *
+ * The normalization map turns bank shorthand into the merchant's common name
+ * — "Fpl Direct Debit Elec Pymt 03/25 …" becomes "Florida Power & Light".
+ * That is the right label to show a human, but this company file calls that
+ * vendor "FPL", so the rewrite was walking the payee away from the record it
+ * needed to match.  The QuickBooks list is the authority on what a payee is
+ * called, so offer both spellings and let the matcher take whichever one is
+ * actually in the file.
+ *
+ * The first entry stays the display name, so nothing about what the user sees
+ * changes when the bank's own spelling is the one that matches.
+ */
+export function cleanTransactionCandidates(raw: string): string[] {
+  const display = cleanAndNormalizeTransaction(raw)
+  const asPrinted = cleanTransaction(raw, { normalize: false })
+  return display === asPrinted ? [display] : [display, asPrinted]
 }

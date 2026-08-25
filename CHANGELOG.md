@@ -1,5 +1,61 @@
 # Changelog
 
+## v1.2.0 — August 25, 2026
+
+### Statement lines inherit the account their payee is already coded to
+
+The Ledger has always been meant to look a payee up in QuickBooks and code it
+to whatever that payee's previous transactions were coded to. It was reading
+almost none of that history, so nearly everything landed on Ask My Accountant
+— including payees whose every transaction in QuickBooks sits on one account.
+
+Measured against a live company file's own 334 checks and deposits: 90% of
+lines now resolve to the QuickBooks record QuickBooks itself uses, 64% land on
+the account already on those transactions, 1.5% differ, and the rest go to Ask
+My Accountant untouched.
+
+**Fixed — most of the history was never read.** Only bills, checks, credit
+card charges and deposits were queried, so a payee coded through a journal
+entry, a vendor credit, an invoice or an item-coded bill looked like it had no
+history at all. Nine transaction types are read now, the customer side
+included, and item-coded lines resolve through the item list.
+
+**Fixed — only the first 500 of each type came back.** The queries asked for
+MaxReturned with no iterator, so QuickBooks returned the oldest 500 and every
+recent transaction — the ones worth learning from — fell off the end. Queries
+page through to the end.
+
+**Fixed — a rejected query was indistinguishable from an empty company file.**
+qbXML reports failures inside the response body rather than throwing, and every
+query was wrapped in a silent catch, so a request QuickBooks turned down
+produced no history and no explanation. Each query's status is checked, and the
+review screen names any query that failed and how many transactions were read.
+
+**Fixed — a consistent split was read as ambiguity.** The guard that holds back
+payees with no dominant account counted expense lines, so a loan payment split
+between principal and interest scored 50/50 across twelve identically coded
+payments and was dropped.  It compares whole transactions now.
+
+**Fixed — the vendor list came back empty.** Vendor records carry `Name` and no
+`FullName`, so nothing was read from them.
+
+**Changed — Pulse no longer picks between accounts.** A payee QuickBooks books
+across several accounts every time, and a name with two QuickBooks records
+coded differently, both go to Ask My Accountant carrying the breakdown rather
+than Pulse choosing one. Uncategorized rows now say which case they are: not in
+QuickBooks, no coded history, a recurring split, or colliding records.
+
+**Improved — payees are recognised from the bank's own wording.** `Zelle From`
+lines kept the whole free-text memo as part of the name; `Online Transfer to`
+prefixed names with "Transfer to", which no QuickBooks record starts with;
+`Orig CO Name:` preferred the entry description over the originating company,
+turning "Panzarella Waste" into "Chckng"; and card purchases carried acquirer
+prefixes and merchant phone numbers. Middle initials and professional suffixes
+are dropped, so "Victor M. Portillo, P.A." reaches "Victor Portillo". Prefix
+matches must land on a word boundary, which lets short real names like "FPL"
+match. Where the merchant map disagrees with the company file — "Florida Power
+& Light" against a vendor named "FPL" — the company file wins.
+
 ## v1.1.0 — August 25, 2026
 
 ### Eight banks now tie to the cent

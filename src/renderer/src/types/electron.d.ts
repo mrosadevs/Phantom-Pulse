@@ -204,16 +204,39 @@ declare global {
           error?: string
         }>
         /**
-         * Entity → account histograms from Bills, Checks, Credit Card Charges,
-         * and Deposits, plus the vendor and customer name lists.  Powers the
-         * Ledger pipeline's three-tier matcher and ambiguity guard.
+         * Entity → account history from every QB transaction type that carries
+         * a category (bills, checks, credit card charges and credits, vendor
+         * credits, invoices, sales receipts, deposits, journal entries), plus
+         * the vendor and customer name lists.  Powers the Ledger pipeline's
+         * three-tier matcher and ambiguity guard.
+         *
+         * `stats` counts TRANSACTIONS, not lines; `signatures` records the set
+         * of accounts each transaction hit, so a recurring split can be told
+         * apart from a payee that is genuinely coded inconsistently.
+         * `diagnostics` reports what each query did — a failed query and an
+         * empty company file are otherwise indistinguishable.
          */
-        getEntityAccountStats: () => Promise<{
+        getEntityAccountStats: (options?: { lookbackYears?: number }) => Promise<{
           success: boolean
           data?: {
             vendors: string[]
             customers: string[]
             stats: Record<string, Record<string, number>>
+            amounts?: Record<string, Record<string, number>>
+            signatures?: Record<string, Record<string, number>>
+            txnCounts?: Record<string, number>
+            diagnostics?: {
+              query: string
+              statusCode: string
+              statusSeverity: string
+              statusMessage: string
+              pages: number
+              transactions: number
+              entries: number
+              truncated: boolean
+              variant: number
+              error?: string
+            }[]
           }
           error?: string
         }>

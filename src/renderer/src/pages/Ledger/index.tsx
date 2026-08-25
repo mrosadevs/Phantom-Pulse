@@ -31,7 +31,7 @@ import {
   findBatchWarnings
 } from '../../utils/pdfStatementParser'
 import type { ParsedPdfResult, AccountType, AccountTypeOption } from '../../utils/pdfStatementParser'
-import { cleanAndNormalizeTransaction } from '../../utils/transactionCleaner'
+import { cleanTransactionCandidates } from '../../utils/transactionCleaner'
 import { matchEntity, buildEntityCatalog } from '../../utils/vendorMatcher'
 import type { EntityCatalog, MatchOutcome } from '../../utils/vendorMatcher'
 import type { LedgerRow } from '../../types/electron'
@@ -157,6 +157,7 @@ export default function LedgerPage() {
   const [qbAccounts, setQbAccounts] = useState<QBAccount[]>([])
   const [targetAccount, setTargetAccount] = useState('')
   const [catalogSize, setCatalogSize] = useState(0)
+  const [historyCoverage, setHistoryCoverage] = useState<{ scanned: number; withHistory: number } | null>(null)
   const [search, setSearch] = useState('')
   const [rowFilter, setRowFilter] = useState<'all' | 'review' | 'uncategorized'>('all')
   const [isUploading, setIsUploading] = useState(false)
@@ -166,6 +167,7 @@ export default function LedgerPage() {
   const reset = () => {
     setStep('upload'); setFiles([]); setRows([]); setPdfMetas([]); setBatchWarnings([])
     setOutcome(null); setSearch(''); setRowFilter('all'); setTargetAccount('')
+    setHistoryCoverage(null)
   }
 
   // ── File handling ───────────────────────────────────────────────────────────
@@ -200,13 +202,44 @@ export default function LedgerPage() {
       let catalog: EntityCatalog | null = null
       let accounts: QBAccount[] = []
       if (qbConnected) {
-        setProcessStatus('Parsing statements + reading QuickBooks lists…')
+        setProcessStatus('Parsing statements + reading QuickBooks history…')
         const [statsRes, acctRes] = await Promise.all([
           window.api.qb.getEntityAccountStats().catch(() => ({ success: false as const })),
           window.api.qb.getAccounts().catch(() => ({ success: false as const, data: [] }))
         ])
         if (statsRes.success && 'data' in statsRes && statsRes.data) {
           catalog = buildEntityCatalog(statsRes.data)
+
+          // qbXML reports failures inside the response, not by throwing, so a
+          // query QuickBooks rejected used to look exactly like a company file
+          // with no bills — and every row quietly became Ask My Accountant.
+          // Say which queries came back empty and why.
+          const diagnostics = statsRes.data.diagnostics ?? []
+          const scanned = diagnostics.reduce((sum, d) => sum + d.transactions, 0)
+          const withHistory = Object.keys(statsRes.data.stats || {}).length
+          setHistoryCoverage({ scanned, withHistory })
+
+          const failed = diagnostics.filter((d) => d.statusSeverity === 'Error')
+          for (const d of failed) {
+            toast.warning(
+              `QuickBooks rejected ${d.query} (${d.statusCode}): ${d.error || d.statusMessage}. ` +
+                'Payees whose history lives in those transactions cannot be categorized.',
+              { duration: 10000 }
+            )
+          }
+          const truncated = diagnostics.filter((d) => d.truncated).map((d) => d.query)
+          if (truncated.length) {
+            toast.warning(
+              `Stopped reading ${truncated.join(', ')} at the page limit — older history was not scanned.`,
+              { duration: 8000 }
+            )
+          }
+          if (scanned === 0 && !failed.length) {
+            toast.warning(
+              'QuickBooks returned no coded transactions to learn from — every row will be uncategorized.',
+              { duration: 8000 }
+            )
+          }
         } else {
           toast.warning('Could not read QuickBooks vendor/customer history — rows will be uncategorized.')
         }
@@ -260,10 +293,22 @@ export default function LedgerPage() {
       setProcessStatus('Cleaning and categorizing…')
       let matched = 0
       const result: LedgerRowMeta[] = parsed.map((t, i) => {
-        const cleaned = cleanAndNormalizeTransaction(t.description)
+        // Try the merchant-normalized spelling first, then the one the bank
+        // actually printed. Their QuickBooks list decides which is right.
+        const candidates = cleanTransactionCandidates(t.description)
+        const cleaned = candidates[0]
         const match: MatchOutcome = catalog
-          ? matchEntity(cleaned, catalog)
-          : { entity: null, entityKind: null, account: null, tier: 'none', needsReview: false, reviewReason: null }
+          ? candidates.map((c) => matchEntity(c, catalog)).find((r) => r.entity) ??
+            matchEntity(cleaned, catalog)
+          : {
+              entity: null,
+              entityKind: null,
+              account: null,
+              split: null,
+              tier: 'none',
+              needsReview: false,
+              reviewReason: null
+            }
         if (match.entity) matched++
 
         const flags = [...t.flags]
@@ -697,9 +742,35 @@ export default function LedgerPage() {
                   ))}
                 </div>
                 {catalogSize > 0 && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-success/10 border border-success/20">
-                    <BadgeCheck size={12} className="text-success" />
-                    <span className="text-[11px] text-success font-medium">{catalogSize} QB names loaded</span>
+                  <div
+                    className={cn(
+                      'flex items-center gap-1.5 px-2.5 py-1 rounded-full border',
+                      historyCoverage && historyCoverage.withHistory === 0
+                        ? 'bg-warning/10 border-warning/25'
+                        : 'bg-success/10 border-success/20'
+                    )}
+                    title={
+                      historyCoverage
+                        ? `${historyCoverage.scanned.toLocaleString()} QB transactions scanned · ` +
+                          `${historyCoverage.withHistory} payees have coded history to learn from`
+                        : undefined
+                    }
+                  >
+                    <BadgeCheck
+                      size={12}
+                      className={
+                        historyCoverage && historyCoverage.withHistory === 0 ? 'text-warning' : 'text-success'
+                      }
+                    />
+                    <span
+                      className={cn(
+                        'text-[11px] font-medium',
+                        historyCoverage && historyCoverage.withHistory === 0 ? 'text-warning' : 'text-success'
+                      )}
+                    >
+                      {catalogSize} QB names
+                      {historyCoverage && ` · ${historyCoverage.withHistory} with history`}
+                    </span>
                   </div>
                 )}
                 <div className="ml-auto text-xs text-text-muted">{filtered.length} rows</div>
