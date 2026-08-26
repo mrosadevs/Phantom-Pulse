@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useQBStore } from '../../store/useQBStore'
+import { useHistoryStore } from '../../store/useHistoryStore'
 import {
   parseStatementPdfsWithMeta,
   findBatchWarnings
@@ -143,6 +144,7 @@ function ValidationBadge({ meta }: { meta: ParsedPdfResult }) {
 
 export default function LedgerPage() {
   const { status } = useQBStore()
+  const { add: addHistory } = useHistoryStore()
   const qbConnected = status.mode === 'qbsdk'
 
   const [step, setStep] = useState<Step>('upload')
@@ -420,7 +422,11 @@ export default function LedgerPage() {
         })
       }
 
-      await window.api.history.add({
+      // Through the store, not window.api directly: the Dashboard renders from
+      // the store's in-memory entries, which Layout loads once on mount. Writing
+      // straight to disk left it stale until the app restarted, so a Ledger
+      // upload never showed up on the dashboard or in History.
+      await addHistory({
         operation: 'import',
         type: effectiveType === 'credit_card' ? 'Credit Card (Ledger)' : 'Checks + Deposits (Ledger)',
         count: attempted,

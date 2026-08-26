@@ -4,6 +4,9 @@ import { QBXML_HEADER, QBXML_FOOTER, TX_TYPE_MAP } from './qbxml'
 // Types that do NOT support <IncludeLineItems> in their query
 const NO_LINE_ITEMS = new Set(['Transfer', 'Receive Payment', 'Bill Payment'])
 
+/** 500 per page — enough headroom for 20,000 transactions of one type. */
+const MAX_PAGES = 40
+
 export async function exportTransactions(
   conn: QBConnection,
   type: string,
@@ -30,14 +33,38 @@ export async function exportTransactions(
     parts.push('<IncludeLineItems>true</IncludeLineItems>')
   }
 
-  const xml = `${QBXML_HEADER}
-    <${typeMap.query}Rq requestID="${Date.now()}">
+  // Page through with a qbXML iterator. Without one QuickBooks returns the
+  // first MaxReturned and stops, silently — this file was already at 423 checks
+  // against a 500 cap, so the next import would have started hiding rows from
+  // the delete and modify screens with nothing to show it had happened.
+  const results: Record<string, string>[] = []
+  const seen = new Set<string>()
+  let iteratorID: string | null = null
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const attrs =
+      page === 0 ? ' iterator="Start"' : ` iterator="Continue" iteratorID="${iteratorID}"`
+    const xml = `${QBXML_HEADER}
+    <${typeMap.query}Rq requestID="${Date.now()}_${page}"${attrs}>
       ${parts.join('\n      ')}
     </${typeMap.query}Rq>
 ${QBXML_FOOTER}`
 
-  const response = await conn.sendRequest(xml)
-  return parseExportResponse(response, type)
+    const response = await conn.sendRequest(xml)
+    for (const row of parseExportResponse(response, type)) {
+      // A Ret block can repeat across pages if the file changes mid-query.
+      const key = row['TxnID'] || JSON.stringify(row)
+      if (seen.has(key)) continue
+      seen.add(key)
+      results.push(row)
+    }
+
+    const remaining = Number(response.match(/iteratorRemainingCount="(\d+)"/)?.[1] ?? '0')
+    iteratorID = response.match(/iteratorID="([^"]+)"/)?.[1] ?? null
+    if (remaining <= 0 || !iteratorID) break
+  }
+
+  return results
 }
 
 function parseExportResponse(xml: string, type: string): Record<string, string>[] {

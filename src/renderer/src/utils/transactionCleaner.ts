@@ -212,8 +212,9 @@ function titleCase(s: string): string {
     .toLowerCase()
     .replace(/(?:^|\s)\S/g, (c) => c.toUpperCase())
     .replace(/\bLlc\b/g, 'LLC')
-    .replace(/\bInc\b/g, 'Inc.')
-    .replace(/\bCorp\b/g, 'Corp.')
+    // Absorb a period the name already had, or "Inc." becomes "Inc.."
+    .replace(/\bInc\b\.?/g, 'Inc.')
+    .replace(/\bCorp\b\.?/g, 'Corp.')
     .replace(/\bLlp\b/g, 'LLP')
     .replace(/\bAch\b/g, 'ACH')
     .replace(/\bAtm\b/g, 'ATM')
@@ -305,6 +306,19 @@ export function cleanTransaction(raw: string, options: CleanOptions = {}): strin
   // ── FUNDS TRN OUT CBOL / INT'L WIRE OUT CBOL WIRE TO <name> ──
   const wireTo = m.match(/^(?:FUNDS TRN OUT CBOL|INT'L WIRE OUT CBOL) WIRE TO (.+?)(?:\s+#\S+)?$/i)
   if (wireTo) return titleCase(wireTo[1].replace(/\s+SA$/i, '').trim())
+
+  // ── Domestic/International wire: "… A/c: <name> <city> <ST-zip> Us Ref: …" ──
+  // The beneficiary sits between "A/c:" and the reference block.  Left whole,
+  // the name runs past QuickBooks' 41-character list limit and carries colons
+  // it will not accept, which is what produced error 3140 on upload.
+  const wireAc = m.match(/\bA\/c:\s*(.+)$/i)
+  if (wireAc) {
+    const name = wireAc[1]
+      .split(/\s+(?:Us\s+)?Ref:|\s+Trn:/i)[0]
+      .replace(/\s+[A-Za-z][A-Za-z.]*\s+[A-Za-z]{2}-\d+\s*$/, '')
+      .trim()
+    if (name) return titleCase(name)
+  }
 
   // ── SERVICE CHARGES INCOMING WIRE FEE ──
   if (/^SERVICE CHARGES INCOMING WIRE FEE\b/i.test(m)) return 'Incoming Wire Fee'

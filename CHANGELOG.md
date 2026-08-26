@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.2.1 — August 26, 2026
+
+**Fixed — a wire transfer failed the upload with QuickBooks error 3140.**
+QuickBooks list names cap at 41 characters and cannot contain a colon, so a
+payee taken from `Online Domestic Wire Transfer A/c: … Us Ref: … Trn:es` could
+never be created, and the check that referenced it was rejected. Wire lines now
+read the beneficiary out of the `A/c:` field, payee names are trimmed to
+something QuickBooks accepts before they are created, and a name QuickBooks
+still refuses no longer takes the transaction down with it — the row books
+without a payee instead.
+
+**Fixed — Ledger uploads did not reach the dashboard or History until the app
+was restarted.** The upload wrote its history entry straight to disk, past the
+in-memory store the dashboard renders from.
+
+**Fixed — Delete and Modify silently stopped at 500 transactions per type.**
+The query asked for the first 500 with no iterator, so anything past that was
+invisible with nothing to say so. Both page through to the end now.
+
+**Fixed — a name that already ended in "Inc." came out as "Inc..".**
+
 ## v1.2.0 — August 25, 2026
 
 ### Statement lines inherit the account their payee is already coded to
