@@ -21,6 +21,17 @@ export async function exportTransactions(
 
   parts.push('<MaxReturned>500</MaxReturned>')
 
+  // "Added since" is a MODIFIED-date filter, not a transaction-date one: it
+  // finds what was written to the company file recently, whatever dates the
+  // transactions themselves carry.  That is what separates an import you just
+  // ran from the history that was already there — transaction dates overlap,
+  // creation times do not.  Must precede TxnDateRangeFilter in the schema.
+  if (filters.addedSince) {
+    parts.push(
+      `<ModifiedDateRangeFilter><FromModifiedDate>${filters.addedSince}T00:00:00</FromModifiedDate></ModifiedDateRangeFilter>`
+    )
+  }
+
   if (filters.fromDate) {
     parts.push(
       `<TxnDateRangeFilter><FromTxnDate>${filters.fromDate}</FromTxnDate>${

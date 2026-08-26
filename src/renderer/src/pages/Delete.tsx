@@ -30,6 +30,7 @@ export default function DeletePage() {
   const [txnType, setTxnType] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [addedSince, setAddedSince] = useState('')
   const [isQuerying, setIsQuerying] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [transactions, setTransactions] = useState<TxnRow[]>([])
@@ -44,7 +45,7 @@ export default function DeletePage() {
     setIsQuerying(true)
     setSelected(new Set())
     try {
-      const result = await window.api.qb.exportTransactions(txnType, { fromDate, toDate })
+      const result = await window.api.qb.exportTransactions(txnType, { fromDate, toDate, addedSince })
       if (result.success && result.data) {
         setTransactions(result.data as TxnRow[])
         setHasQueried(true)
@@ -165,7 +166,7 @@ export default function DeletePage() {
 
         {/* Filters */}
         <div className="glass-card p-5">
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-5 gap-4">
             <div>
               <label className="text-xs text-text-muted mb-1.5 block font-medium">
                 Transaction Type *
@@ -200,6 +201,21 @@ export default function DeletePage() {
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
+                className="input-field w-full text-sm cursor-pointer date-picker-dark"
+              />
+            </div>
+
+            <div>
+              <label
+                className="text-xs text-text-muted mb-1.5 block font-medium"
+                title="Filters on when the transaction was written to QuickBooks, not its transaction date — use it to find just what a recent import added."
+              >
+                Added to QB since
+              </label>
+              <input
+                type="date"
+                value={addedSince}
+                onChange={(e) => setAddedSince(e.target.value)}
                 className="input-field w-full text-sm cursor-pointer date-picker-dark"
               />
             </div>

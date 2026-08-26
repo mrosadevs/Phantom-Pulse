@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.2.2 — August 26, 2026
+
+**New — "Added to QB since" on the Delete screen.** Undoing an import meant
+picking it out by transaction date, which does not separate what an import just
+added from the history that was already in the file — those dates overlap. This
+filter matches on when a transaction was written to QuickBooks instead, so an
+import can be selected and removed on its own without touching anything that
+was there before.
+
 ## v1.2.1 — August 26, 2026
 
 **Fixed — a wire transfer failed the upload with QuickBooks error 3140.**
