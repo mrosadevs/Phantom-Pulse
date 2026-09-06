@@ -189,6 +189,27 @@ function stripBankCodes(s: string): string {
     .trim()
 }
 
+/**
+ * The counterparty on a Zelle line, with the bank's own trailer removed.
+ *
+ * Everything after the name belongs to the network, not the payee: a payment
+ * ID, a confirmation number, the posting date, or the free-text memo the
+ * sender typed. Cut at whichever comes first.
+ *
+ * The reference-code rule requires at least six more characters after the
+ * issuer prefix, because "Bac" alone also begins a surname — a payee called
+ * Bacon should keep their name, while "BACziwebiabt" is plainly a reference.
+ */
+function zelleCounterparty(rest: string): string {
+  const name = rest
+    .split(/\s+payment\s+id\b|\s+on\s+\d{1,2}\/\d{1,2}\b|\s+ref\s*#|\s+conf\s*#|\s+for\s+"|\s+memo:/i)[0]
+    .replace(/\s+(?:Bac|Wfct|Cof|Cti|Mac|Hna|H50|Bbt|Jpm|0Ou)[A-Za-z0-9]{6,}\b.*$/i, '')
+    .replace(/\s+\d{8,}.*$/, '')
+    .replace(/\s+CA$/, '')
+    .trim()
+  return stripBankCodes(name)
+}
+
 function stripCardNoise(s: string): string {
   return s
     .replace(/\s+card[\s#*]*\d{4,}/gi, '')
@@ -389,66 +410,30 @@ export function cleanTransaction(raw: string, options: CleanOptions = {}): strin
     return crd ? `Online Banking payment to CRD ${crd[1]}` : 'Online Banking payment'
   }
 
-  // ── Zelle payment from <name> for "<memo>" ──
-  if (/^Zelle payment from .+ for "/i.test(m)) {
-    const z = m.match(/^Zelle payment from (.+?)\s+for\s+"/i)
-    if (z) return titleCase(stripBankCodes(z[1]))
-  }
-
-  // ── Zelle payment from <name> [Conf#] ──
-  if (/^Zelle payment from /i.test(m)) {
-    const zConf = m.match(/^Zelle payment from (.+?)\s+Conf#/i)
-    if (zConf) return titleCase(stripBankCodes(zConf[1]))
-    let name = m.replace(/^Zelle payment from /i, '').trim()
-    name = name.replace(/\s+(?:Bac|Wfct|Cof|Cti|Mac|Hna|H50|Bbt|0Ou)\S+.*/i, '')
-    name = name.replace(/\s+\d{8,}.*/, '')
-    return titleCase(name.trim())
-  }
-
-  // ── Zelle payment to <name> for "<memo>" ──
-  if (/^Zelle payment to .+ for "/i.test(m)) {
-    const z = m.match(/^Zelle payment to (.+?)\s+for\s+"/i)
-    if (z) return titleCase(stripBankCodes(z[1]))
-  }
-
-  // ── Zelle payment to <name> [Conf#] ──
-  if (/^Zelle payment to /i.test(m)) {
-    const zConf = m.match(/^Zelle payment to (.+?)\s+Conf#/i)
-    if (zConf) return titleCase(stripBankCodes(zConf[1]))
-    let name = m.replace(/^Zelle payment to /i, '').trim()
-    name = name.replace(/\s+(?:Bac|Wfct|Cof|Cti|Mac|Hna|H50|Bbt|0Ou)\S+.*/i, '')
-    name = name.replace(/\s+\d{8,}.*/, '')
-    return titleCase(name.trim())
-  }
-
-  // ── Zelle to <name> on MM/DD Ref# (old format) ──
-  if (/^Zelle to /i.test(m)) {
-    const zRef = m.match(/^Zelle to (.+?)\s+on\s+\d+\/\d+\s+Ref\s+#/i)
-    if (zRef) return titleCase(stripBankCodes(zRef[1]))
-    return titleCase(m.replace(/^Zelle to /i, '').replace(/\s+Ref\s+#\S+.*/i, '').trim())
-  }
-
-  // ── Zelle From/To <name> … (no "Payment", and often a free-text memo tacked
-  // on the end: "Zelle From Christine Taylor on 03/12 Ref # Ctz01Zf2Hn5C One
-  // Month Security 5195 NE 18th Ave").  Everything from the first "on MM/DD",
-  // "Ref #", "Conf#" or long reference number onward is the bank's, not the
-  // payee's — cut there or the name never matches the QuickBooks record.
-  if (/^Zelle\s+(?:from|to)\s+/i.test(m)) {
-    const name = m
-      .replace(/^Zelle\s+(?:from|to)\s+/i, '')
-      .split(/\s+on\s+\d{1,2}\/\d{1,2}|\s+Ref\s*#|\s+Conf\s*#|\s+for\s+"/i)[0]
-      .replace(/\s+\d{8,}.*$/, '')
-      .trim()
-    if (name) return titleCase(stripBankCodes(name))
-  }
-
-  // ── Zelle Payment From (old capitalized format) ──
-  if (m.startsWith('Zelle Payment From ')) {
-    let name = m.replace(/^Zelle Payment From /, '')
-    name = name.replace(/\s+(?:Bac|Wfct|Cof|Cti|Mac|Hna|H50|Bbt|0Ou)\S+.*/, '')
-    name = name.replace(/\s+\d{8,}.*/, '')
-    name = name.replace(/\s+CA$/, '').trim()
-    return titleCase(name)
+  // ── Zelle, whatever wording the bank wraps around it ──────────────────────
+  //
+  // A Zelle line is always the same sentence: the network, a direction, and
+  // the person on the other end. What differs is the padding each bank puts
+  // between them —
+  //
+  //   Zelle payment from JOHN DOE Conf# abc123
+  //   Zelle From Christine Taylor on 03/12 Ref # Ctz01Zf2Hn5C One Month Rent
+  //   ZELLE BUSINESS PAYMENT FROM DESIREE GOMEZ PAYMENT ID BACziwebiabt
+  //
+  // so match on the direction rather than on any one bank's phrasing. This
+  // used to be six near-identical branches keyed to exact prefixes, and
+  // Truist's "BUSINESS PAYMENT" wording fell through all of them to the
+  // normalization map, which rewrites anything starting "ZELLE" to the bare
+  // network name. Every counterparty in the statement then arrived as the
+  // single payee "Zelle" — and the matcher, seeing a name that is a prefix of
+  // one real QuickBooks payee, filed a whole year of unrelated senders under
+  // that one person. The counterparty is the payee; the network never is.
+  if (/^zelle\b/i.test(m)) {
+    const z = m.match(/^zelle\b.*?\b(?:from|to)\s+(.+)$/i)
+    if (z) {
+      const name = zelleCounterparty(z[1])
+      if (name) return titleCase(name)
+    }
   }
 
   // ── Mobile transfer from CHK N Confirmation#; Last, First ──

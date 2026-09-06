@@ -15,6 +15,7 @@
  */
 import { parseReport, reportToRows } from '../src/main/qb/reports'
 import { findDuplicates, findUncategorized, find1099Issues, runCloseChecks } from '../src/main/qb/analysis'
+import { cleanTransaction } from '../src/renderer/src/utils/transactionCleaner'
 
 let passed = 0
 let failed = 0
@@ -264,6 +265,55 @@ ok('an unexplained journal entry is caught', dirtyChecks.find((c) => c.id === 'j
 
 const futureChecks = runCloseChecks([txn({ date: '2099-01-01' })], accounts, [], [])
 ok('a future-dated transaction is caught', futureChecks.find((c) => c.id === 'future-dated')?.count === 1)
+
+// Two clusters out of one bucket must not share a key.  The UI keys its rows
+// and tracks which group is expanded by this value, so a repeat merges two
+// separate findings into one row.
+const twoClusters = findDuplicates([
+  txn({ date: '2026-03-01' }),
+  txn({ date: '2026-03-02' }),
+  txn({ date: '2026-06-01' }),
+  txn({ date: '2026-06-02' })
+])
+ok('a bucket splits into two clusters', twoClusters.length === 2, `got ${twoClusters.length}`)
+ok(
+  'cluster keys are unique',
+  new Set(twoClusters.map((g) => g.key)).size === twoClusters.length,
+  twoClusters.map((g) => g.key).join(' | ')
+)
+
+// ── Zelle payee extraction ───────────────────────────────────────────────────
+//
+// Every bank wraps the same sentence differently.  What must never happen is a
+// fall through to the bare network name: "Zelle" is a prefix of any badly
+// named QuickBooks payee like "Zelle From Omar Aguilera on 09/22 Ref # B", and
+// the matcher will then file every unrelated sender in the statement under
+// that one person.
+const ZELLE_CASES = [
+  ['ZELLE BUSINESS PAYMENT FROM DESIREE GOMEZ PAYMENT ID BACziwebiabt', 'Desiree Gomez'],
+  ['ZELLE BUSINESS PAYMENT FROM LEONARDO BRACHO PAYMENT ID JPM99bwo576l', 'Leonardo Bracho'],
+  ['ZELLE BUSINESS PAYMENT FROM ANGEL JOSE ARAUJO ROMERO PAYMENT ID 0OU0QBO1TZMD', 'Angel Jose Araujo Romero'],
+  ['ZELLE BUSINESS PAYMENT TO Becxi Santos PAYMENT ID BBT353897335', 'Becxi Santos'],
+  ['Zelle payment from JOHN DOE Conf# abc123', 'John Doe'],
+  ['Zelle payment from JOHN DOE for "rent"', 'John Doe'],
+  ['Zelle payment to JANE ROE Conf# xyz', 'Jane Roe'],
+  ['Zelle to JANE ROE on 03/12 Ref # abc123', 'Jane Roe'],
+  ['Zelle From Christine Taylor on 03/12 Ref # Ctz01Zf2Hn5C One Month Security', 'Christine Taylor'],
+  ['Zelle Payment From MARIA LOPEZ CA', 'Maria Lopez'],
+  // A reference code prefix is also the start of a surname; six trailing
+  // characters is what separates "BACziwebiabt" from "Bacon".
+  ['Zelle payment from Maria Bacon Conf# q1', 'Maria Bacon']
+]
+
+for (const [raw, want] of ZELLE_CASES) {
+  const got = cleanTransaction(raw)
+  ok(`zelle: ${want}`, got === want, `got "${got}"`)
+}
+
+ok(
+  'no Zelle format resolves to the bare network name',
+  !ZELLE_CASES.some(([raw]) => /^zelle$/i.test(cleanTransaction(raw)))
+)
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 

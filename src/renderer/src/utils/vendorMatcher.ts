@@ -64,6 +64,29 @@ const FUZZY_CUTOFF = 0.88
 const DOMINANCE_THRESHOLD = 0.7
 const DOMINANCE_MIN_TXNS = 3
 
+/**
+ * Payment rails, not payees.
+ *
+ * When a bank line cannot be resolved to a counterparty it can still clean
+ * down to the network that carried it — "Zelle", "Venmo", "ACH Debit". Those
+ * are not names, and the loose tiers below will happily attach one to any
+ * QuickBooks payee it happens to prefix. A company file that already contains
+ * a badly-named payee like "Zelle From Omar Aguilera on 09/22 Ref # B" then
+ * swallows every unresolved Zelle transfer in the file — hundreds of unrelated
+ * senders filed under one person, all inheriting that payee's account.
+ *
+ * An exact match is still honoured: if a payee is genuinely called "Zelle" in
+ * QuickBooks, that is the file owner's own decision. Anything looser is
+ * refused, and the row goes to review uncoded, which is the correct answer for
+ * a transfer whose counterparty is unknown.
+ */
+const PAYMENT_RAILS = new Set([
+  'ZELLE', 'VENMO', 'CASH APP', 'CASHAPP', 'PAYPAL', 'WIRE', 'WIRE TRANSFER',
+  'ACH', 'ACH DEBIT', 'ACH CREDIT', 'CHECK', 'TRANSFER', 'BOOK TRANSFER',
+  'DEPOSIT', 'WITHDRAWAL', 'ATM', 'ATM WITHDRAWAL', 'BANK TRANSFER',
+  'ONLINE TRANSFER', 'MOBILE DEPOSIT', 'DEBIT CARD', 'CREDIT CARD'
+])
+
 /** Must match SIGNATURE_SEP in src/main/qb/entityHistory.ts. */
 export const SIGNATURE_SEP = ' || '
 
@@ -243,6 +266,16 @@ export function matchEntity(rawName: string, catalog: EntityCatalog): MatchOutco
   const exact = prepared.byNorm.get(needle)
   if (exact?.length) {
     return resolveCandidates(catalog, exact, 'exact')
+  }
+
+  // A bare payment rail is not a payee. Past the exact tier it can only do
+  // damage, so stop here and let the row be reviewed uncoded.
+  if (PAYMENT_RAILS.has(needle)) {
+    return {
+      ...none,
+      needsReview: true,
+      reviewReason: `"${rawName}" names a payment method, not a payee — no counterparty on the bank line`
+    }
   }
 
   // Tier 2: prefix — most-supported (highest volume) wins

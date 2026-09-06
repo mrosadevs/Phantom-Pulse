@@ -368,7 +368,11 @@ export function findDuplicates(txns: ScannedTxn[], dayTolerance = 5): DuplicateG
       if (refs.length === cluster.length && distinct.size === cluster.length) return
 
       groups.push({
-        key,
+        // One bucket can flush several clusters — that is what the date-gap
+        // walk is for — so the bucket key alone repeats across them. The UI
+        // keys rows and tracks which group is expanded by this value, so a
+        // repeat makes separate findings collide. Pin it to the cluster.
+        key: `${key}|${cluster[0].txnId}`,
         entity: cluster[0].entity,
         amount: cluster[0].amount,
         transactions: [...cluster]

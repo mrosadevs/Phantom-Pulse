@@ -179,7 +179,12 @@ export default function HygienePage() {
                       return (
                         <div
                           key={g.key}
-                          className="rounded-xl border border-white/[0.08] bg-bg-surface/60 overflow-hidden"
+                          // shrink-0 is load-bearing: these cards are flex
+                          // children in a fixed-height column, so without it a
+                          // long list compresses every card toward zero height
+                          // instead of scrolling, and overflow-hidden clips the
+                          // text away — leaving a grid of bare borders.
+                          className="shrink-0 rounded-xl border border-white/[0.08] bg-bg-surface/60 overflow-hidden"
                         >
                           <button
                             onClick={() => toggle(g.key)}
