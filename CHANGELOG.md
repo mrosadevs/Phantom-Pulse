@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.3.1 — September 6, 2026
+
+**Fixed — every Zelle transfer keeps its own name.** Banks each wrap the same
+sentence differently, and Truist's "ZELLE BUSINESS PAYMENT FROM ..." matched
+none of the patterns Pulse knew, so those lines fell back to the bare network
+name. Every sender in a statement then arrived as one payee called "Zelle" —
+and because that is a prefix of any badly named payee already in the file, the
+matcher filed hundreds of unrelated people under one of them. Zelle lines are
+now read by direction rather than by any one bank's phrasing, so the person on
+the other end is the payee. On the statements that surfaced this, 306
+transfers now resolve to 269 distinct payees.
+
+A payment method is no longer allowed to stand in for a payee at all. Where a
+bank names no counterparty, the transaction goes to review uncoded instead of
+being attached to whoever happens to share the first word.
+
+**Fixed — Clean Up shows its duplicates again.** A long list of findings
+compressed into a grid of empty rows rather than scrolling. Separate findings
+that shared a payee and amount could also collide with each other.
+
 ## v1.3.0 — September 6, 2026
 
 **New — Reports.** Profit & Loss, Balance Sheet, Trial Balance, Cash Flows,
