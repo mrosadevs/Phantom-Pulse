@@ -15,7 +15,9 @@
     "gen-key": "node scripts/gen-key.mjs",
     "machine-id": "node scripts/show-machine-id.mjs",
     "make-icon": "node scripts/make-icon.mjs",
-    "test:license": "node scripts/test-license.mjs"
+    "test:license": "node scripts/test-license.mjs",
+    "test:analysis": "esbuild scripts/test-analysis.mjs --bundle --platform=node --format=esm --outfile=node_modules/.cache/test-analysis.mjs && node node_modules/.cache/test-analysis.mjs",
+    "test": "npm run test:license && npm run test:analysis"
   },
   "dependencies": {
     "@accuracy/statement-parser": "github:mrosadevs/phantom-statement-parser#v1.1.3",

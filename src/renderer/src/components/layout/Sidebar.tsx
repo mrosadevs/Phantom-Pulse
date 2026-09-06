@@ -11,7 +11,12 @@ import {
   ChevronLeft,
   Loader2,
   BookOpen,
-  FileSpreadsheet
+  FileSpreadsheet,
+  BarChart3,
+  ShieldCheck,
+  Sparkles,
+  Layers,
+  PackagePlus
 } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import { useQBStore } from '../../store/useQBStore'
@@ -38,10 +43,20 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     ]
   },
   {
+    title: 'Analysis',
+    items: [
+      { path: '/reports', icon: BarChart3, label: 'Reports' },
+      { path: '/audit', icon: ShieldCheck, label: 'Audit' },
+      { path: '/hygiene', icon: Sparkles, label: 'Clean Up' }
+    ]
+  },
+  {
     title: 'Tools',
     items: [
+      { path: '/bulk', icon: Layers, label: 'Bulk Edit' },
       { path: '/ledger', icon: FileSpreadsheet, label: 'Ledger' },
       { path: '/gl-import', icon: BookOpen, label: 'GL Import' },
+      { path: '/setup', icon: PackagePlus, label: 'New Client' },
       { path: '/history', icon: History, label: 'History' }
     ]
   }

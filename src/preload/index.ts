@@ -63,7 +63,59 @@ contextBridge.exposeInMainWorld('api', {
     getVendorAccountMap: () =>
       ipcRenderer.invoke('qb:getVendorAccountMap'),
     getEntityAccountStats: (options?: { lookbackYears?: number }) =>
-      ipcRenderer.invoke('qb:getEntityAccountStats', options)
+      ipcRenderer.invoke('qb:getEntityAccountStats', options),
+
+    // Reports
+    listReports: () => ipcRenderer.invoke('qb:listReports'),
+    runReport: (
+      reportId: string,
+      options?: { from?: string; to?: string; dateMacro?: string; basis?: 'Accrual' | 'Cash' }
+    ) => ipcRenderer.invoke('qb:runReport', reportId, options),
+    reportToRows: (report: unknown) => ipcRenderer.invoke('qb:reportToRows', report),
+
+    // Analysis — one scan, every read-only finding
+    analyze: (options?: {
+      from?: string
+      to?: string
+      types?: string[]
+      includeDeleted?: boolean
+    }) => ipcRenderer.invoke('qb:analyze', options),
+    findTransactions: (options?: { from?: string; to?: string; types?: string[] }) =>
+      ipcRenderer.invoke('qb:findTransactions', options),
+
+    // Bulk writes
+    bulkModify: (txns: unknown[], change: unknown) =>
+      ipcRenderer.invoke('qb:bulkModify', txns, change),
+    bulkVoid: (txns: unknown[]) => ipcRenderer.invoke('qb:bulkVoid', txns),
+    bulkStamp: (txns: unknown[], fieldName: string, value: string) =>
+      ipcRenderer.invoke('qb:bulkStamp', txns, fieldName, value),
+
+    // New-client template
+    captureTemplate: (sections?: string[], filePath?: string) =>
+      ipcRenderer.invoke('qb:captureTemplate', sections, filePath),
+    readTemplate: (filePath: string) => ipcRenderer.invoke('qb:readTemplate', filePath),
+    replayTemplate: (template: unknown, sections: string[]) =>
+      ipcRenderer.invoke('qb:replayTemplate', template, sections),
+
+    // Progress streams.  Each returns an unsubscribe — call it on unmount, or
+    // a remounting page stacks a listener per mount.
+    onAnalyzeProgress: (cb: (p: { step: string; detail: string }) => void) => {
+      const handler = (_e: unknown, p: { step: string; detail: string }): void => cb(p)
+      ipcRenderer.on('qb:analyzeProgress', handler)
+      return () => ipcRenderer.removeListener('qb:analyzeProgress', handler)
+    },
+    onBulkProgress: (cb: (p: { done: number; total: number; current: string }) => void) => {
+      const handler = (_e: unknown, p: { done: number; total: number; current: string }): void =>
+        cb(p)
+      ipcRenderer.on('qb:bulkProgress', handler)
+      return () => ipcRenderer.removeListener('qb:bulkProgress', handler)
+    },
+    onTemplateProgress: (cb: (p: { done: number; total: number; current: string }) => void) => {
+      const handler = (_e: unknown, p: { done: number; total: number; current: string }): void =>
+        cb(p)
+      ipcRenderer.on('qb:templateProgress', handler)
+      return () => ipcRenderer.removeListener('qb:templateProgress', handler)
+    }
   },
 
   // History/store operations

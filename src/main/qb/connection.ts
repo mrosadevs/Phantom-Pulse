@@ -201,11 +201,16 @@ export class QBConnection {
     this.status = { connected: false, mode: 'disconnected' }
   }
 
-  async sendRequest(qbXML: string): Promise<string> {
+  /**
+   * @param timeoutMs Override the 30 s default.  Report queries need it: a
+   *   General Ledger over several years is a genuinely long computation inside
+   *   QuickBooks, and the range cannot be split without breaking the subtotals.
+   */
+  async sendRequest(qbXML: string, timeoutMs?: number): Promise<string> {
     if (!this.status.connected) {
       throw new Error('Not connected to QuickBooks Desktop')
     }
-    return this.send<string>('sendRequest', { xml: qbXML })
+    return this.send<string>('sendRequest', { xml: qbXML }, timeoutMs)
   }
 
   isConnected(): boolean {

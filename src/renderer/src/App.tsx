@@ -10,6 +10,11 @@ import HistoryPage from './pages/History'
 import SettingsPage from './pages/Settings'
 import GLImportPage from './pages/GLImport'
 import LedgerPage from './pages/Ledger'
+import ReportsPage from './pages/Reports'
+import AuditPage from './pages/Audit'
+import HygienePage from './pages/Hygiene'
+import BulkEditPage from './pages/BulkEdit'
+import SetupPage from './pages/Setup'
 import LicenseGate from './components/LicenseGate'
 import UpdatePrompt from './components/UpdatePrompt'
 
@@ -43,6 +48,11 @@ export default function App() {
               <Route path="history" element={<HistoryPage />} />
               <Route path="gl-import" element={<GLImportPage />} />
               <Route path="ledger" element={<LedgerPage />} />
+              <Route path="reports" element={<ReportsPage />} />
+              <Route path="audit" element={<AuditPage />} />
+              <Route path="hygiene" element={<HygienePage />} />
+              <Route path="bulk" element={<BulkEditPage />} />
+              <Route path="setup" element={<SetupPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Routes>

@@ -85,6 +85,184 @@ export interface UpdaterStatusPayload {
   auto?: boolean
 }
 
+export interface ReportSpec {
+  id: string
+  label: string
+  group: 'Financial statements' | 'Receivables & payables' | 'Sales & income' | 'Expenses' | 'Jobs'
+  family: 'summary' | 'detail' | 'aging' | 'job'
+  reportType: string
+  blurb: string
+  /** False for "as of" reports (balance sheet, trial balance, aging). */
+  ranged: boolean
+}
+
+export interface ReportRow {
+  kind: 'data' | 'subtotal' | 'total' | 'text'
+  /** Nesting depth from QuickBooks' <ReportSubReport> wrappers. */
+  depth: number
+  label: string
+  /** Values by column index, aligned to ParsedReport.columns. Sparse. */
+  cells: string[]
+}
+
+export interface ParsedReport {
+  title: string
+  subtitle: string
+  basis: string
+  /** Index 0 is the label column and is always empty. */
+  columns: string[]
+  rows: ReportRow[]
+  /** Which request variant QuickBooks accepted; >0 means elements were dropped. */
+  variant: number
+  statusCode: string
+  statusSeverity: string
+  statusMessage: string
+}
+
+export interface ReportOptions {
+  from?: string
+  to?: string
+  /** A QuickBooks date macro, e.g. ThisFiscalYear. Wins over from/to. */
+  dateMacro?: string
+  basis?: 'Accrual' | 'Cash'
+}
+
+export interface ScannedTxn {
+  type: string
+  txnId: string
+  /** Required by every *Mod; a stale one makes QuickBooks reject the edit. */
+  editSequence: string
+  date: string
+  refNumber: string
+  memo: string
+  entity: string
+  amount: number
+  accounts: string[]
+  cleared: string
+}
+
+export interface ScanDiagnostic {
+  query: string
+  statusCode: string
+  statusSeverity: string
+  statusMessage: string
+  pages: number
+  records: number
+  truncated: boolean
+  variant: number
+  error?: string
+}
+
+export interface Vendor1099Row {
+  vendor: string
+  listId: string
+  paid: number
+  eligible: boolean
+  hasTaxId: boolean
+  issues: string[]
+}
+
+export interface DuplicateGroup {
+  key: string
+  entity: string
+  amount: number
+  transactions: ScannedTxn[]
+}
+
+export interface UncategorizedRow {
+  txn: ScannedTxn
+  account: string
+}
+
+export interface DeadListRow {
+  kind: string
+  name: string
+  listId: string
+  isActive: boolean
+  detail: string
+}
+
+export interface DeletedRow {
+  kind: 'Transaction' | 'List entry'
+  type: string
+  txnId: string
+  refNumber: string
+  name: string
+  timeDeleted: string
+  timeCreated: string
+}
+
+export interface CloseCheck {
+  id: string
+  label: string
+  status: 'pass' | 'warn' | 'fail'
+  detail: string
+  count: number
+}
+
+export interface AnalysisResult {
+  transactionCount: number
+  vendors1099: Vendor1099Row[]
+  threshold1099: number
+  duplicates: DuplicateGroup[]
+  uncategorized: UncategorizedRow[]
+  deadListItems: DeadListRow[]
+  deleted: DeletedRow[]
+  closeChecks: CloseCheck[]
+  accounts: { name: string; type: string; isActive: boolean }[]
+  diagnostics: ScanDiagnostic[]
+}
+
+export interface BulkResult {
+  txnId: string
+  label: string
+  status: 'ok' | 'failed' | 'skipped'
+  message?: string
+}
+
+export interface BatchSummary {
+  results: BulkResult[]
+  ok: number
+  failed: number
+  skipped: number
+}
+
+export interface ModifyChange {
+  fromAccount?: string
+  toAccount?: string
+  memo?: string
+  appendMemo?: string
+  allLines?: boolean
+}
+
+export type TemplateSection = 'accounts' | 'customers' | 'vendors' | 'classes' | 'items'
+
+export interface TemplateEntry {
+  name: string
+  type?: string
+  description?: string
+  accountNumber?: string
+}
+
+export interface CompanyTemplate {
+  format: 'phantom-pulse-template@1'
+  createdAt: string
+  sourceCompany: string
+  accounts: TemplateEntry[]
+  customers: TemplateEntry[]
+  vendors: TemplateEntry[]
+  classes: TemplateEntry[]
+  items: TemplateEntry[]
+  diagnostics: ScanDiagnostic[]
+}
+
+export interface ReplaySummary {
+  results: { section: TemplateSection; name: string; status: 'created' | 'exists' | 'failed'; message?: string }[]
+  created: number
+  exists: number
+  failed: number
+}
+
 export interface LicenseStatus {
   activated: boolean
   machineId: string
@@ -240,6 +418,89 @@ declare global {
           }
           error?: string
         }>
+        /** The report catalogue — served from main so there is one copy. */
+        listReports: () => Promise<{ success: boolean; data?: ReportSpec[]; error?: string }>
+        /**
+         * Run one report.  QuickBooks computes every figure; see
+         * src/main/qb/reports.ts for why we never recompute them here.
+         * On a qbXML error `data` still carries the parsed status.
+         */
+        runReport: (
+          reportId: string,
+          options?: ReportOptions
+        ) => Promise<{
+          success: boolean
+          data?: ParsedReport
+          spec?: ReportSpec
+          error?: string
+        }>
+        /** Flatten a report for Excel, hierarchy preserved as indentation. */
+        reportToRows: (report: ParsedReport) => Promise<{
+          success: boolean
+          data?: { headers: string[]; rows: string[][] }
+          error?: string
+        }>
+        /**
+         * One pass over the company file feeding every read-only finding —
+         * 1099 readiness, duplicates, uncategorized, dead list entries, the
+         * close checklist, and optionally the deletion log.  A single call
+         * because walking a large file once beats walking it five times.
+         */
+        analyze: (options?: {
+          from?: string
+          to?: string
+          types?: string[]
+          /** QuickBooks only retains roughly 90 days of deletions. */
+          includeDeleted?: boolean
+        }) => Promise<{ success: boolean; data?: AnalysisResult; error?: string }>
+        /** Transactions matching a filter, for the Bulk Edit picker. */
+        findTransactions: (options?: { from?: string; to?: string; types?: string[] }) => Promise<{
+          success: boolean
+          data?: ScannedTxn[]
+          diagnostics?: ScanDiagnostic[]
+          modifiableTypes?: string[]
+          error?: string
+        }>
+        /**
+         * Reclassify and/or stamp a memo across many transactions.  Each one is
+         * re-read and rebuilt whole before writing — a partial line rebuild
+         * deletes the lines you leave out.
+         */
+        bulkModify: (
+          txns: ScannedTxn[],
+          change: ModifyChange
+        ) => Promise<{ success: boolean; data?: BatchSummary; error?: string }>
+        /** Void, which preserves the audit trail. Not the same as delete. */
+        bulkVoid: (
+          txns: ScannedTxn[]
+        ) => Promise<{ success: boolean; data?: BatchSummary; error?: string }>
+        /** Write a QuickBooks custom field. Never touches transaction lines. */
+        bulkStamp: (
+          txns: ScannedTxn[],
+          fieldName: string,
+          value: string
+        ) => Promise<{ success: boolean; data?: BatchSummary; error?: string }>
+        /** Capture the connected file's lists, optionally saving to disk. */
+        captureTemplate: (
+          sections?: TemplateSection[],
+          filePath?: string
+        ) => Promise<{ success: boolean; data?: CompanyTemplate; error?: string }>
+        readTemplate: (
+          filePath: string
+        ) => Promise<{ success: boolean; data?: CompanyTemplate; error?: string }>
+        /** Replay a template into the connected file. Adds only, never deletes. */
+        replayTemplate: (
+          template: CompanyTemplate,
+          sections: TemplateSection[]
+        ) => Promise<{ success: boolean; data?: ReplaySummary; error?: string }>
+        /** All three return an unsubscribe function — call it on unmount. */
+        onAnalyzeProgress: (cb: (p: { step: string; detail: string }) => void) => () => void
+        onBulkProgress: (
+          cb: (p: { done: number; total: number; current: string }) => void
+        ) => () => void
+        onTemplateProgress: (
+          cb: (p: { done: number; total: number; current: string }) => void
+        ) => () => void
       }
       history: {
         getAll: () => Promise<HistoryEntry[]>

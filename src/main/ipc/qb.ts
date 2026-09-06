@@ -12,6 +12,33 @@ import { importTransactions } from '../qb/importer'
 import { exportTransactions } from '../qb/exporter'
 import { collectEntityHistory } from '../qb/entityHistory'
 import type { EntityHistoryOptions } from '../qb/entityHistory'
+import { REPORTS, findReport, runReport, reportToRows } from '../qb/reports'
+import type { ReportOptions } from '../qb/reports'
+import {
+  scanTransactions,
+  fetchList,
+  find1099Issues,
+  findDuplicates,
+  findUncategorized,
+  findDeadListItems,
+  fetchDeleted,
+  runCloseChecks,
+  THRESHOLD_1099
+} from '../qb/analysis'
+import type { ScanOptions, ScannedTxn } from '../qb/analysis'
+import {
+  modifyTransaction,
+  voidTransaction,
+  stampCustomField,
+  runBatch,
+  canModify,
+  modifiableTypes
+} from '../qb/bulk'
+import type { ModifyChange } from '../qb/bulk'
+import { captureTemplate, replayTemplate } from '../qb/setup'
+import type { CompanyTemplate, TemplateSection } from '../qb/setup'
+import { BrowserWindow } from 'electron'
+import { readFileSync, writeFileSync } from 'fs'
 
 const qbConnection = new QBConnection()
 
@@ -396,6 +423,281 @@ export function registerQBHandlers(ipcMain: IpcMain): void {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
+
+  // The report catalogue.  Static, but served over IPC so the renderer has one
+  // source of truth rather than a second copy that drifts.
+  ipcMain.handle('qb:listReports', async () => {
+    return { success: true, data: REPORTS }
+  })
+
+  // Run one report.  See src/main/qb/reports.ts for why QuickBooks computes the
+  // figures rather than us.
+  ipcMain.handle('qb:runReport', async (_, reportId: string, options?: ReportOptions) => {
+    try {
+      if (!qbConnection.isConnected()) {
+        return { success: false, error: 'Not connected to QuickBooks Desktop' }
+      }
+
+      const spec = findReport(reportId)
+      if (!spec) return { success: false, error: `Unknown report "${reportId}".` }
+
+      // 5 minutes: a multi-year General Ledger is slow inside QuickBooks itself,
+      // and timing out halfway wastes all of that work.
+      const report = await runReport(
+        (xml) => qbConnection.sendRequest(xml, 300_000),
+        spec,
+        options ?? {}
+      )
+
+      if (report.statusSeverity === 'Error') {
+        return { success: false, error: report.statusMessage, data: report }
+      }
+
+      return { success: true, data: report, spec }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Flatten a report for the Excel exporter, preserving hierarchy as indentation.
+  ipcMain.handle('qb:reportToRows', async (_, report: unknown) => {
+    try {
+      return { success: true, data: reportToRows(report as Parameters<typeof reportToRows>[0]) }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // ── Analysis (read-only) ──────────────────────────────────────────────────
+
+  /** Push progress to the renderer so a long scan does not look frozen. */
+  const emit = (channel: string, payload: unknown): void => {
+    BrowserWindow.getAllWindows()[0]?.webContents.send(channel, payload)
+  }
+
+  const send = (xml: string): Promise<string> => qbConnection.sendRequest(xml, 300_000)
+
+  /**
+   * One pass over the company file, feeding every read-only analysis.
+   *
+   * Deliberately a single IPC call rather than one per feature: walking a large
+   * file four times would take four times as long, and the analyses are pure
+   * functions over the same scan.
+   */
+  ipcMain.handle('qb:analyze', async (_, options?: ScanOptions & { includeDeleted?: boolean }) => {
+    try {
+      if (!qbConnection.isConnected()) {
+        return { success: false, error: 'Not connected to QuickBooks Desktop' }
+      }
+
+      emit('qb:analyzeProgress', { step: 'Reading transactions', detail: 'This can take a minute on a large file' })
+      const scan = await scanTransactions(send, options ?? {})
+
+      emit('qb:analyzeProgress', { step: 'Reading lists', detail: 'Accounts, vendors, customers' })
+      const [accounts, vendors, customers, items, classes] = await Promise.all(
+        ['Account', 'Vendor', 'Customer', 'Item', 'Class'].map((k) => fetchList(send, k))
+      )
+
+      emit('qb:analyzeProgress', { step: 'Analysing', detail: '' })
+
+      const uncategorized = findUncategorized(scan.transactions, accounts.entries)
+      const duplicates = findDuplicates(scan.transactions)
+      const dead = findDeadListItems(
+        [
+          { kind: 'Account', entries: accounts.entries },
+          { kind: 'Vendor', entries: vendors.entries },
+          { kind: 'Customer', entries: customers.entries },
+          { kind: 'Item', entries: items.entries },
+          { kind: 'Class', entries: classes.entries }
+        ],
+        scan.transactions
+      )
+
+      let deleted: Awaited<ReturnType<typeof fetchDeleted>> = { rows: [], diagnostics: [] }
+      if (options?.includeDeleted) {
+        emit('qb:analyzeProgress', { step: 'Reading deletion log', detail: 'QuickBooks keeps ~90 days' })
+        deleted = await fetchDeleted(send, { from: options.from, to: options.to })
+      }
+
+      return {
+        success: true,
+        data: {
+          transactionCount: scan.transactions.length,
+          vendors1099: find1099Issues(vendors.entries, scan.transactions),
+          threshold1099: THRESHOLD_1099,
+          duplicates,
+          uncategorized,
+          deadListItems: dead,
+          deleted: deleted.rows,
+          closeChecks: runCloseChecks(
+            scan.transactions,
+            accounts.entries,
+            uncategorized,
+            duplicates
+          ),
+          accounts: accounts.entries.map((a) => ({
+            name: a.name,
+            type: a.extra['AccountType'] ?? '',
+            isActive: a.isActive
+          })),
+          diagnostics: [
+            ...scan.diagnostics,
+            accounts.diagnostic,
+            vendors.diagnostic,
+            customers.diagnostic,
+            ...deleted.diagnostics
+          ]
+        }
+      }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  /** Transactions matching a filter, for the Bulk Edit picker. */
+  ipcMain.handle('qb:findTransactions', async (_, options?: ScanOptions) => {
+    try {
+      if (!qbConnection.isConnected()) {
+        return { success: false, error: 'Not connected to QuickBooks Desktop' }
+      }
+      const scan = await scanTransactions(send, options ?? {})
+      return {
+        success: true,
+        data: scan.transactions,
+        diagnostics: scan.diagnostics,
+        modifiableTypes: modifiableTypes()
+      }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // ── Bulk writes ───────────────────────────────────────────────────────────
+
+  const asItems = (txns: ScannedTxn[]): { type: string; txnId: string; label: string }[] =>
+    txns.map((t) => ({
+      type: t.type,
+      txnId: t.txnId,
+      label: `${t.type} ${t.refNumber || t.date} · ${t.entity || 'no payee'}`
+    }))
+
+  const progress = (channel: string) => (p: { done: number; total: number; current: string }) =>
+    emit(channel, p)
+
+  /**
+   * Reclassify, or stamp a memo, across many transactions.
+   *
+   * See src/main/qb/bulk.ts: each transaction is re-read and rebuilt in full
+   * before writing, because a partial line rebuild deletes the omitted lines.
+   */
+  ipcMain.handle('qb:bulkModify', async (_, txns: ScannedTxn[], change: ModifyChange) => {
+    try {
+      if (!qbConnection.isConnected()) {
+        return { success: false, error: 'Not connected to QuickBooks Desktop' }
+      }
+      const summary = await runBatch(
+        asItems(txns.filter((t) => canModify(t.type))),
+        (item) => modifyTransaction(send, item.type, item.txnId, item.label, change),
+        progress('qb:bulkProgress')
+      )
+      return { success: true, data: summary }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('qb:bulkVoid', async (_, txns: ScannedTxn[]) => {
+    try {
+      if (!qbConnection.isConnected()) {
+        return { success: false, error: 'Not connected to QuickBooks Desktop' }
+      }
+      const summary = await runBatch(
+        asItems(txns),
+        (item) => voidTransaction(send, item.type, item.txnId, item.label),
+        progress('qb:bulkProgress')
+      )
+      return { success: true, data: summary }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle(
+    'qb:bulkStamp',
+    async (_, txns: ScannedTxn[], fieldName: string, value: string) => {
+      try {
+        if (!qbConnection.isConnected()) {
+          return { success: false, error: 'Not connected to QuickBooks Desktop' }
+        }
+        const summary = await runBatch(
+          asItems(txns),
+          (item) =>
+            stampCustomField(send, {
+              txnType: item.type,
+              txnId: item.txnId,
+              label: item.label,
+              fieldName,
+              value
+            }),
+          progress('qb:bulkProgress')
+        )
+        return { success: true, data: summary }
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  // ── New-client template ───────────────────────────────────────────────────
+
+  ipcMain.handle('qb:captureTemplate', async (_, sections?: TemplateSection[], filePath?: string) => {
+    try {
+      if (!qbConnection.isConnected()) {
+        return { success: false, error: 'Not connected to QuickBooks Desktop' }
+      }
+      const template = await captureTemplate(
+        send,
+        qbConnection.getStatus().companyName ?? 'Unknown company',
+        sections
+      )
+      if (filePath) writeFileSync(filePath, JSON.stringify(template, null, 2), 'utf8')
+      return { success: true, data: template }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('qb:readTemplate', async (_, filePath: string) => {
+    try {
+      const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as CompanyTemplate
+      if (parsed.format !== 'phantom-pulse-template@1') {
+        return { success: false, error: 'That file is not a Phantom Pulse template.' }
+      }
+      return { success: true, data: parsed }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle(
+    'qb:replayTemplate',
+    async (_, template: CompanyTemplate, sections: TemplateSection[]) => {
+      try {
+        if (!qbConnection.isConnected()) {
+          return { success: false, error: 'Not connected to QuickBooks Desktop' }
+        }
+        const summary = await replayTemplate(
+          send,
+          template,
+          sections,
+          progress('qb:templateProgress')
+        )
+        return { success: true, data: summary }
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
 
   // Auto-detect QB company file path from the running QB process
   ipcMain.handle('qb:detectCompanyFile', async () => {

@@ -1,5 +1,46 @@
 # Changelog
 
+## v1.3.0 — September 6, 2026
+
+**New — Reports.** Profit & Loss, Balance Sheet, Trial Balance, Cash Flows,
+General Ledger, A/R and A/P aging, income and expense breakdowns, and job
+profitability, run against the connected company file and exportable to Excel.
+QuickBooks computes every figure — Pulse asks the report engine rather than
+summing transactions itself, because anything recomputed here would eventually
+disagree with what the client sees in QuickBooks, and the client is right.
+
+**New — Audit.** 1099 readiness flags vendors over the $600 threshold that are
+not marked eligible, and vendors marked eligible with no tax ID on file, in
+November rather than January. A period-close checklist runs the standard
+pre-close tests as one pass. The deletion log surfaces what QuickBooks still
+remembers being removed, which answers "what happened to invoice 1042?" without
+a support call.
+
+**New — Clean Up.** Whole-file duplicate detection, an uncategorized sweep that
+finds everything parked in Uncategorized Expense or Ask My Accountant, and a
+never-used report for list entries no transaction references. Duplicate
+detection clusters by date gap so a recurring monthly bill is not reported as a
+double entry, and ignores groups where every transaction carries a distinct
+reference number.
+
+**New — Bulk Edit.** Reclassify expense lines, stamp QuickBooks custom fields,
+and void transactions across a selection. Each transaction is re-read and
+rebuilt in full immediately before writing: a *Mod request that sends some
+expense lines but not others causes QuickBooks to DELETE the omitted ones, so a
+naive bulk edit destroys splits. Transactions carrying item lines are skipped
+and reported rather than rebuilt approximately. Voiding is kept separate from
+deleting, because voiding preserves the audit trail.
+
+**New — New Client Setup.** Capture a chart of accounts, classes, service items,
+customers and vendors from one company file and recreate them in another.
+QuickBooks allows one open company file at a time, so the template goes through
+a reusable file on disk. Accounts are created parent-first, and a name that
+already exists is left exactly as it is.
+
+Analysis is one pass over the file shared by Audit and Clean Up, rather than one
+scan per page. `npm run test:analysis` covers the report parser and the
+analysis heuristics against fixture qbXML.
+
 ## v1.2.2 — August 26, 2026
 
 **New — "Added to QB since" on the Delete screen.** Undoing an import meant
