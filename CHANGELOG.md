@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.3.4 — September 9, 2026
 
 **New — a card payment already in QuickBooks is no longer uploaded twice.** A
 payment to a credit card appears on two statements: the bank's, where the money
