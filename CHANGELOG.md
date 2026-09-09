@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+**Fixed — Spanish-language statements are read as statements.** Chase issues
+the same statement in Spanish, and Pulse got it wrong in every way at once. The
+accented column heading "DESCRIPCIÓN" was not recognised, so no section was
+found — and without a section, deposits and withdrawals could not be told
+apart, surnames printed on the following line were dropped, and any row showing
+a second date was discarded outright. One August statement extracted 44 rows
+where the bank counts 51, with six ACH debits posted as deposits, and not one
+of the statement's printed totals could be reconciled. It now extracts all 51
+and ties to the cent against all four of the statement's own checks.
+
+Every payee on that file also arrived as the whole Spanish sentence, so nothing
+matched an existing QuickBooks name. The translated clause naming the
+transaction type is now stripped, and the English rules run on the detail
+behind it — the same detail a US statement carries.
+
+**Fixed — Zelle payments are named wherever the network appears.** The rule
+only looked at the start of the line, so a Zelle payment introduced by anything
+else went unread. Payment reference codes are now recognised by their shape
+rather than by a list of issuer prefixes, so a new one no longer ends up inside
+the payee's name.
+
+**Fixed — ACH transfers name the company again.** "Orig CO Name:" was matched
+case-sensitively, so a fifth of a Spanish statement arrived as its own raw ACH
+trace record instead of a payee.
+
+Verified against 220 client statements with no regressions; two further Spanish
+files now validate that previously could not.
+
 ## v1.3.1 — September 6, 2026
 
 **Fixed — every Zelle transfer keeps its own name.** Banks each wrap the same

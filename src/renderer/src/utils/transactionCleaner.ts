@@ -199,11 +199,18 @@ function stripBankCodes(s: string): string {
  * The reference-code rule requires at least six more characters after the
  * issuer prefix, because "Bac" alone also begins a surname — a payee called
  * Bacon should keep their name, while "BACziwebiabt" is plainly a reference.
+ *
+ * Chase then mints IDs under prefixes no list will ever finish enumerating
+ * ("pncaa0cjm61X", "coftnrfi0bvm", "jpm99csp53im"), so a second rule catches
+ * the shape rather than the issuer: ten or more characters mixing letters and
+ * digits. No surname looks like that, and the length floor keeps "414" and
+ * "2912 Downtown" — real payees that open with a number — intact.
  */
 function zelleCounterparty(rest: string): string {
   const name = rest
     .split(/\s+payment\s+id\b|\s+on\s+\d{1,2}\/\d{1,2}\b|\s+ref\s*#|\s+conf\s*#|\s+for\s+"|\s+memo:/i)[0]
     .replace(/\s+(?:Bac|Wfct|Cof|Cti|Mac|Hna|H50|Bbt|Jpm|0Ou)[A-Za-z0-9]{6,}\b.*$/i, '')
+    .replace(/\s+(?=[A-Za-z0-9]{10,}\b)(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{10,}\b.*$/, '')
     .replace(/\s+\d{8,}.*$/, '')
     .replace(/\s+CA$/, '')
     .trim()
@@ -216,7 +223,9 @@ function stripCardNoise(s: string): string {
     .replace(/\s+\d{1,2}\/\d{2}\b/g, '')
     .replace(/\s+[A-Z][a-zA-Z]+\s+[A-Z]{2}\s*$/, '')
     .replace(/\s+[A-Z]{2}\s*$/, '')
-    .replace(/\s+\S+\.com\b/gi, '')
+    // Including whatever path the acquirer appended — "amzn.Com/bill" left a
+    // bare "/bill" hanging off the merchant name.
+    .replace(/\s+\S+\.com\S*/gi, '')
     // Merchant phone numbers ride along on card purchases: "Solaris Pools
     // 954-7565162", "Cty Fort Lauderdal 954-828-5150".  The digit rule below
     // misses them because of the dashes.
@@ -259,6 +268,31 @@ export function cleanTransaction(raw: string, options: CleanOptions = {}): strin
   const normalize = options.normalize !== false
 
   const m = raw.trim()
+
+  // ── Spanish-language statements: drop the transaction-type clause ─────────
+  //
+  // Chase issues the same statement in Spanish, and the only thing it
+  // translates is the leading clause naming the kind of transaction. What
+  // follows the full stop is the identical English detail a US statement
+  // carries:
+  //
+  //   Retiro quickpay por internet. Zelle payment to Marcos Touma 30265805496
+  //   Débito de cámara de compensación automatizada. Orig CO name:FPL Direct
+  //   Devolución de compra con tarjeta. Card purchase return 08/19 amazon
+  //
+  // So strip the clause and let the English rules below do their work — one
+  // rule instead of a Spanish twin for every format. Without it none of them
+  // fired, every payee arrived as the whole Spanish sentence, and not a single
+  // row matched an existing QuickBooks name.
+  //
+  // The clause must open with a word Spanish and English do not share — the
+  // accented forms and "retiro"/"compra"/"transferencia" — and must contain a
+  // Spanish connector, so a US merchant that happens to end a sentence
+  // ("Cargo Express Inc. 400 Main St") is left alone.
+  const spanishLeadIn = m.match(
+    /^(?:transferencias?|dep[oó]sitos?|d[eé]bito|retiros?|compra|devoluci[oó]n|abono|cheque)\b[^.]*\b(?:de|del|con|por|para|en|y)\b[^.]*\.\s+(\S.*)$/i
+  )
+  if (spanishLeadIn) return cleanTransaction(spanishLeadIn[1], options)
 
   // ── MISC DEPOSIT PAY ID ... ORG ID ... NAME <person> ──
   const miscDepositName = m.match(/^MISC DEPOSIT PAY ID \S+ ORG ID \S+ NAME (.+)$/i)
@@ -428,8 +462,13 @@ export function cleanTransaction(raw: string, options: CleanOptions = {}): strin
   // single payee "Zelle" — and the matcher, seeing a name that is a prefix of
   // one real QuickBooks payee, filed a whole year of unrelated senders under
   // that one person. The counterparty is the payee; the network never is.
-  if (/^zelle\b/i.test(m)) {
-    const z = m.match(/^zelle\b.*?\b(?:from|to)\s+(.+)$/i)
+  //
+  // The network name need not open the line either — a bank is free to put its
+  // own words in front of it — so anchor on the word, not the start. The
+  // search stops at a full stop so it can only read a direction out of the
+  // same sentence the network was named in.
+  if (/\bzelle\b/i.test(m)) {
+    const z = m.match(/\bzelle\b[^.]*?\b(?:from|to)\s+(.+)$/i)
     if (z) {
       const name = zelleCounterparty(z[1])
       if (name) return titleCase(name)
@@ -505,9 +544,18 @@ export function cleanTransaction(raw: string, options: CleanOptions = {}): strin
   // like "Chckng" or "Bill Pay", which is how "Orig CO Name:Panzarella Waste …
   // CO Entry Descr:Chckng" used to clean down to "Chckng".  Take the company
   // name and fall back to the description only when there isn't one.
-  if (m.startsWith('Orig CO Name:')) {
+  // Case-insensitively: Chase writes "Orig CO Name:" in English and "Orig CO
+  // name:" in Spanish, and the exact-case test failed every ACH row on a
+  // Spanish statement — a fifth of the file arriving as its own raw trace
+  // record instead of a payee.
+  if (/^Orig CO Name:/i.test(m)) {
     const co = m.match(/Orig CO Name:(.+?)\s+Orig\s+ID:/i)
-    if (co?.[1]?.trim()) return titleCase(co[1].trim())
+    if (co?.[1]?.trim()) {
+      // The company field carries the originator's ACH number after the name
+      // ("airbnb 4977"); the name alone is the payee.
+      const name = titleCase(co[1].trim().replace(/\s+\d{3,}$/, ''))
+      return normalize ? applyNormalizationMap(name) : name
+    }
 
     const descr = m.match(/CO Entry Descr:(\w+)/i)
     if (descr && !['ACH', 'PMT', 'ACHPMT'].includes(descr[1].toUpperCase())) {
@@ -536,7 +584,9 @@ export function cleanTransaction(raw: string, options: CleanOptions = {}): strin
 
   // ── [Recurring] Card Purchase [With Pin] MM/DD <merchant> <city> <ST> Card #### ──
   const cardPurchase = m.match(
-    /^(?:Recurring\s+)?Card Purchase(?:\s+With\s+Pin)?\s+\d{1,2}\/\d{1,2}\s+(.+)$/i
+    // "Card purchase return" is a refund — the merchant is named the same way,
+    // and the statement's own section already carries the sign.
+    /^(?:Recurring\s+)?Card Purchase(?:\s+With\s+Pin|\s+Return)?\s+\d{1,2}\/\d{1,2}\s+(.+)$/i
   )
   if (cardPurchase) {
     const merchant = stripCardNoise(cardPurchase[1])

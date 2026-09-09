@@ -302,7 +302,24 @@ const ZELLE_CASES = [
   ['Zelle Payment From MARIA LOPEZ CA', 'Maria Lopez'],
   // A reference code prefix is also the start of a surname; six trailing
   // characters is what separates "BACziwebiabt" from "Bacon".
-  ['Zelle payment from Maria Bacon Conf# q1', 'Maria Bacon']
+  ['Zelle payment from Maria Bacon Conf# q1', 'Maria Bacon'],
+
+  // Chase's Spanish statements wrap the same sentence in a translated clause
+  // naming the transaction type, and mint payment IDs under prefixes no list
+  // will finish enumerating.  The counterparty is still the payee.
+  [
+    'Transferencia externa para depÓsito quickpay por internet. Zelle payment from david mejiasanchez pncaa0cjm61X',
+    'David Mejiasanchez'
+  ],
+  ['DepÓsito quickpay por internet. Zelle payment from marco cassabgi 30263857088', 'Marco Cassabgi'],
+  ['Retiro quickpay por internet. Zelle payment to marcos touma 30265805496', 'Marcos Touma'],
+  [
+    'Retiro quickpay por internet para transferencia externa. Zelle payment to accuracy consulting group inc jpm99csp53im',
+    'Accuracy Consulting Group Inc.'
+  ],
+  // A payee whose own name opens with digits must survive the payment-ID rule.
+  ['Retiro quickpay por internet. Zelle payment to 2912 downtown LLC 30264530841', '2912 Downtown LLC'],
+  ['Retiro quickpay por internet. Zelle payment to 414 all services LLC 30291026329', '414 All Services LLC']
 ]
 
 for (const [raw, want] of ZELLE_CASES) {
@@ -314,6 +331,41 @@ ok(
   'no Zelle format resolves to the bare network name',
   !ZELLE_CASES.some(([raw]) => /^zelle$/i.test(cleanTransaction(raw)))
 )
+
+// ── Spanish-language statements ──────────────────────────────────────────────
+//
+// Chase issues the same statement in Spanish and translates only the leading
+// clause; the detail after the full stop is the identical English text.  The
+// clause has to be stripped for any of the English rules to fire — without it
+// every payee arrived as the whole Spanish sentence and nothing matched.
+
+const SPANISH_CASES = [
+  [
+    'DÉbito de cÁmara de compensaciÓn automatizada. Orig CO name:fpl direct debit orig ID:3590247775 desc date:08/26',
+    'Florida Power & Light'
+  ],
+  [
+    'DepÓsito de cÁmara de compensaciÓn automatizada. Orig CO name:airbnb 4977 orig ID:1463165559 desc date:aug 17',
+    'Airbnb'
+  ],
+  ['Compra con tarjeta. Card purchase 08/04 staples 1831 miami FL card 1796', 'Staples Miami'],
+  [
+    'DevoluciÓn de compra con tarjeta. Card purchase return 08/19 amazon mktplace pmts amzn.Com/bill WA card 1796',
+    'Amazon Mktplace Pmts'
+  ],
+  // English lines that merely contain a full stop must not be read as Spanish
+  // and have their opening clause thrown away.  The Spanish nouns are chosen
+  // so that none of them is also an English word: "depósito" is matched, but
+  // "deposit" is not, and neither is "debit", "transfer" or "check".
+  ['Purchase authorized on 04/12 Cargo Express Inc. Miami FL', 'Cargo Express Inc. Miami'],
+  ['Deposit from Compass Inc. ref 8812', 'Deposit From Compass Inc. Ref'],
+  ['Debit for Sunshine Co. monthly', 'Debit For Sunshine Co. Monthly']
+]
+
+for (const [raw, want] of SPANISH_CASES) {
+  const got = cleanTransaction(raw)
+  ok(`spanish: ${want}`, got === want, `got "${got}"`)
+}
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 
