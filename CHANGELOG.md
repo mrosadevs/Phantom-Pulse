@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+**New — a card payment already in QuickBooks is no longer uploaded twice.** A
+payment to a credit card appears on two statements: the bank's, where the money
+leaves checking, and the card's, where the balance comes down. They are one
+event, and which side gets imported first is not knowable in advance. Uploading
+the card side on top of a payment already entered from the bank paid the card
+twice and left its balance low by that amount; skipping it blind would lose the
+payments that were made from an account not on the books at all.
+
+Pulse now asks QuickBooks. Before a credit card upload, every payment row is
+checked against the company file for anything touching that card account for
+the same amount within a few days — a check written on checking and coded to
+the card, a transfer from checking, a journal entry, or the card statement
+already imported once. Matches are shown in the review screen, tinted and
+unticked, naming the transaction that already covers them: "already in QB ·
+Check #1042 from Chase Checking on 2026-03-14". They are held back from the
+upload unless you tick them, and the count carries into the upload summary.
+
+Charges are deliberately left alone. Two identical small purchases on one day
+are ordinary, and withholding the second would be a worse error than the one
+being prevented. Only money coming off the balance is checked.
+
+A check that could not run says so. If QuickBooks refuses a query, the review
+screen reports that the check failed and to verify payments by hand, rather
+than showing a clean bill of health it has not earned — and rows held back by
+an earlier check are released rather than left withheld on the strength of a
+result no longer standing behind them.
+
+This also makes re-running a half-finished import safe: the transactions the
+first attempt managed to write are now recognised as already present.
+
 ## v1.3.3 — September 9, 2026
 
 **Fixed — credit card charges can be deleted.** The Delete screen sends the

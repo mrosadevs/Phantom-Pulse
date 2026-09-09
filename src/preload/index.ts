@@ -82,6 +82,11 @@ contextBridge.exposeInMainWorld('api', {
     }) => ipcRenderer.invoke('qb:analyze', options),
     findTransactions: (options?: { from?: string; to?: string; types?: string[] }) =>
       ipcRenderer.invoke('qb:findTransactions', options),
+    findCardPaymentMatches: (
+      account: string,
+      rows: { id: number; date: string; amount: number }[],
+      dayTolerance?: number
+    ) => ipcRenderer.invoke('qb:findCardPaymentMatches', account, rows, dayTolerance),
 
     // Bulk writes
     bulkModify: (txns: unknown[], change: unknown) =>

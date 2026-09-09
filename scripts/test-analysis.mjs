@@ -15,6 +15,7 @@
  */
 import { parseReport, reportToRows } from '../src/main/qb/reports'
 import { findDuplicates, findUncategorized, find1099Issues, runCloseChecks } from '../src/main/qb/analysis'
+import { findCardPaymentMatches } from '../src/main/qb/cardPayments'
 import { cleanTransaction } from '../src/renderer/src/utils/transactionCleaner'
 
 let passed = 0
@@ -366,6 +367,124 @@ for (const [raw, want] of SPANISH_CASES) {
   const got = cleanTransaction(raw)
   ok(`spanish: ${want}`, got === want, `got "${got}"`)
 }
+
+// ── Credit card payment duplicates ───────────────────────────────────────────
+
+// A payment to a card is on two statements at once.  These fixtures are the
+// four shapes it takes in a company file — and the fifth case, a refund, which
+// has no bank-side counterpart and must never be withheld.
+
+const CARD = 'Chase Credit Card'
+
+/** Wrap Ret blocks in the response envelope runPaged expects. */
+function qbResponse(rq, inner) {
+  const rs = rq.replace(/Rq$/, 'Rs')
+  return (
+    `<?xml version="1.0"?><QBXML><QBXMLMsgsRs>` +
+    `<${rs} requestID="scan_0" statusCode="0" statusSeverity="Info" statusMessage="Status OK">` +
+    inner +
+    `</${rs}></QBXMLMsgsRs></QBXML>`
+  )
+}
+
+/** A sender that answers each query type from a fixture table. */
+function senderFor(byRq) {
+  return async (xml) => {
+    const rq = xml.match(/<(\w+QueryRq)\b/)?.[1] ?? ''
+    return qbResponse(rq, byRq[rq] ?? '')
+  }
+}
+
+// A Check drawn on checking and coded to the card account.
+const CHECK_TO_CARD = `<CheckRet>
+  <TxnID>CHK-1</TxnID><TxnDate>2026-03-14</TxnDate><RefNumber>1042</RefNumber>
+  <AccountRef><FullName>Chase Checking</FullName></AccountRef>
+  <Amount>2450.00</Amount>
+  <ExpenseLineRet><TxnLineID>1</TxnLineID>
+    <AccountRef><FullName>${CARD}</FullName></AccountRef><Amount>2450.00</Amount>
+  </ExpenseLineRet>
+</CheckRet>`
+
+// A Transfer, which names its accounts TransferFrom/ToAccountRef — the shape a
+// plain <AccountRef> search misses entirely.
+const TRANSFER_TO_CARD = `<TransferRet>
+  <TxnID>TRF-1</TxnID><TxnDate>2026-03-28</TxnDate>
+  <TransferFromAccountRef><FullName>Chase Checking</FullName></TransferFromAccountRef>
+  <TransferToAccountRef><FullName>${CARD}</FullName></TransferToAccountRef>
+  <Amount>1100.00</Amount>
+</TransferRet>`
+
+// A Journal Entry crediting the card: no header total at all.
+const JE_TO_CARD = `<JournalEntryRet>
+  <TxnID>JE-1</TxnID><TxnDate>2026-03-05</TxnDate>
+  <JournalDebitLine><AccountRef><FullName>${CARD}</FullName></AccountRef><Amount>500.00</Amount></JournalDebitLine>
+  <JournalCreditLine><AccountRef><FullName>Chase Checking</FullName></AccountRef><Amount>500.00</Amount></JournalCreditLine>
+</JournalEntryRet>`
+
+const rowsIn = [
+  { id: 1, date: '2026-03-15', amount: -2450.0 }, // paid by check on the 14th
+  { id: 2, date: '2026-03-28', amount: -1100.0 }, // paid by transfer, same day
+  { id: 3, date: '2026-03-06', amount: -500.0 }, // journal entry on the 5th
+  { id: 4, date: '2026-03-22', amount: -84.19 } // a refund — nothing to match
+]
+
+const full = await findCardPaymentMatches(
+  senderFor({
+    CheckQueryRq: CHECK_TO_CARD,
+    TransferQueryRq: TRANSFER_TO_CARD,
+    JournalEntryQueryRq: JE_TO_CARD
+  }),
+  { account: CARD, rows: rowsIn }
+)
+
+const matchedIds = full.matches.map((m) => m.rowId).sort()
+ok('card: check, transfer and journal entry all match', String(matchedIds) === '1,2,3', String(matchedIds))
+ok('card: a refund with no counterpart is not withheld', !full.matches.some((m) => m.rowId === 4))
+ok(
+  'card: the match names the account it was paid from',
+  full.matches.find((m) => m.rowId === 1)?.existing.otherAccount === 'Chase Checking'
+)
+ok('card: a clean read is not reported incomplete', full.incomplete === false)
+
+// The card account is the whole point of the filter: an identical payment to a
+// DIFFERENT card must not suppress this one.
+const otherCard = await findCardPaymentMatches(
+  senderFor({ CheckQueryRq: CHECK_TO_CARD.replace(CARD, 'Amex Card') }),
+  { account: CARD, rows: [rowsIn[0]] }
+)
+ok('card: a payment to another card is not a match', otherCard.matches.length === 0)
+
+// Outside the tolerance window it is a different payment, not this one.
+const stale = await findCardPaymentMatches(senderFor({ CheckQueryRq: CHECK_TO_CARD }), {
+  account: CARD,
+  rows: [{ id: 1, date: '2026-04-20', amount: -2450.0 }]
+})
+ok('card: same amount five weeks later is not a match', stale.matches.length === 0)
+
+// Two identical payments in one month against one recorded check: the check can
+// only account for one of them, or a real payment goes missing.
+const twice = await findCardPaymentMatches(senderFor({ CheckQueryRq: CHECK_TO_CARD }), {
+  account: CARD,
+  rows: [
+    { id: 1, date: '2026-03-14', amount: -2450.0 },
+    { id: 2, date: '2026-03-16', amount: -2450.0 }
+  ]
+})
+ok('card: one existing payment claims only one row', twice.matches.length === 1, `matched ${twice.matches.length}`)
+
+// A failed query must not read as "nothing found".
+const broken = await findCardPaymentMatches(
+  async (xml) => {
+    const rq = xml.match(/<(\w+QueryRq)\b/)?.[1] ?? ''
+    if (rq === 'CheckQueryRq') {
+      return `<?xml version="1.0"?><QBXML><QBXMLMsgsRs><CheckQueryRs requestID="scan_0" statusCode="3100" statusSeverity="Error" statusMessage="Query failed"/></QBXMLMsgsRs></QBXML>`
+    }
+    return qbResponse(rq, '')
+  },
+  { account: CARD, rows: [rowsIn[0]] }
+)
+ok('card: a failed query reports incomplete rather than all-clear', broken.incomplete === true)
+
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 

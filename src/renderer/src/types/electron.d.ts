@@ -462,6 +462,39 @@ declare global {
           error?: string
         }>
         /**
+         * Which of these credit card rows are already in the company file.
+         *
+         * The same payment sits on both the bank statement and the card
+         * statement, so whichever is imported second would double it.  Matches
+         * anything touching the card account for the same amount within a few
+         * days — Check, Transfer, Journal Entry or an earlier import.
+         *
+         * `incomplete` means a query failed: an empty `matches` then means "we
+         * could not look", not "there is nothing there".
+         */
+        findCardPaymentMatches: (
+          account: string,
+          rows: { id: number; date: string; amount: number }[],
+          dayTolerance?: number
+        ) => Promise<{
+          success: boolean
+          matches?: {
+            rowId: number
+            existing: {
+              txnId: string
+              type: string
+              date: string
+              refNumber: string
+              memo: string
+              amount: number
+              otherAccount: string
+            }
+          }[]
+          diagnostics?: ScanDiagnostic[]
+          incomplete?: boolean
+          error?: string
+        }>
+        /**
          * Reclassify and/or stamp a memo across many transactions.  Each one is
          * re-read and rebuilt whole before writing — a partial line rebuild
          * deletes the lines you leave out.

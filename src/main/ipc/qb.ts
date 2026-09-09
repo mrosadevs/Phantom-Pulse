@@ -11,6 +11,8 @@ import {
 } from '../qb/qbxml'
 import { importTransactions } from '../qb/importer'
 import { exportTransactions } from '../qb/exporter'
+import { findCardPaymentMatches } from '../qb/cardPayments'
+import type { PaymentRow } from '../qb/cardPayments'
 import { collectEntityHistory } from '../qb/entityHistory'
 import type { EntityHistoryOptions } from '../qb/entityHistory'
 import { REPORTS, findReport, runReport, reportToRows } from '../qb/reports'
@@ -599,6 +601,33 @@ export function registerQBHandlers(ipcMain: IpcMain): void {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
+
+  /**
+   * Which of these card rows are already in the company file.
+   *
+   * A payment to a credit card lands on two statements — the bank's and the
+   * card's — and which side it was entered from is not knowable in advance.
+   * See src/main/qb/cardPayments.ts.
+   */
+  ipcMain.handle(
+    'qb:findCardPaymentMatches',
+    async (_, account: string, rows: PaymentRow[], dayTolerance?: number) => {
+      try {
+        if (!qbConnection.isConnected()) {
+          return { success: false, error: 'Not connected to QuickBooks Desktop' }
+        }
+        const result = await findCardPaymentMatches(send, { account, rows, dayTolerance })
+        return {
+          success: true,
+          matches: result.matches,
+          diagnostics: result.diagnostics,
+          incomplete: result.incomplete
+        }
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
 
   // ── Bulk writes ───────────────────────────────────────────────────────────
 

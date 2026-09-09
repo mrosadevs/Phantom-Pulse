@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react'
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   FileText,
@@ -54,6 +54,23 @@ interface LedgerRowMeta {
   matchTier: MatchOutcome['tier']
   flags: string[]
   reviewReason: string | null
+  /**
+   * The transaction already in QuickBooks that looks like this same payment,
+   * when there is one.  See src/main/qb/cardPayments.ts: a payment to a card
+   * sits on both the bank statement and the card statement, so whichever is
+   * imported second doubles it.
+   */
+  duplicateOf: DuplicateInfo | null
+  /** Held back from the upload.  Set for you on a duplicate; yours to undo. */
+  excluded: boolean
+}
+
+interface DuplicateInfo {
+  type: string
+  date: string
+  refNumber: string
+  amount: number
+  otherAccount: string
 }
 
 interface QBAccount {
@@ -158,10 +175,16 @@ export default function LedgerPage() {
   const [effectiveType, setEffectiveType] = useState<AccountType>('bank')
   const [qbAccounts, setQbAccounts] = useState<QBAccount[]>([])
   const [targetAccount, setTargetAccount] = useState('')
+  const [dupCheck, setDupCheck] = useState<{
+    status: 'idle' | 'checking' | 'done' | 'failed'
+    found: number
+    incomplete: boolean
+    message?: string
+  }>({ status: 'idle', found: 0, incomplete: false })
   const [catalogSize, setCatalogSize] = useState(0)
   const [historyCoverage, setHistoryCoverage] = useState<{ scanned: number; withHistory: number } | null>(null)
   const [search, setSearch] = useState('')
-  const [rowFilter, setRowFilter] = useState<'all' | 'review' | 'uncategorized'>('all')
+  const [rowFilter, setRowFilter] = useState<'all' | 'review' | 'uncategorized' | 'duplicates'>('all')
   const [isUploading, setIsUploading] = useState(false)
   const [outcome, setOutcome] = useState<UploadOutcome | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -327,7 +350,9 @@ export default function LedgerPage() {
           matched: Boolean(match.entity),
           matchTier: match.tier,
           flags,
-          reviewReason: match.reviewReason
+          reviewReason: match.reviewReason,
+          duplicateOf: null,
+          excluded: false
         }
       })
 
@@ -345,6 +370,102 @@ export default function LedgerPage() {
     }
   }
 
+  // ── Already in QuickBooks? ───────────────────────────────────────────────────
+
+  /**
+   * A payment to a credit card appears on two statements — the bank's and the
+   * card's — and it is a coin toss which one gets imported first.  When the
+   * bank side is already booked, uploading the card side pays the card twice
+   * and the balance ends up low by that amount.  When it is not, the card side
+   * is the only record there is and must go up.
+   *
+   * Only QuickBooks can settle which, so it is asked, and only about the rows
+   * that could be a payment: on a card statement the money coming off the
+   * balance is negative.  Charges are left alone deliberately — two identical
+   * small purchases on one day are ordinary, and withholding the second would
+   * be a worse error than the one being prevented.
+   */
+  useEffect(() => {
+    if (step !== 'review') return
+    if (effectiveType !== 'credit_card' || !targetAccount || !qbConnected) {
+      setDupCheck({ status: 'idle', found: 0, incomplete: false })
+      return
+    }
+
+    const candidates = rows
+      .filter((r) => r.amount < 0 && Math.abs(r.amount) >= 0.005)
+      .map((r) => ({ id: r.id, date: r.date, amount: r.amount }))
+
+    if (!candidates.length) {
+      setDupCheck({ status: 'done', found: 0, incomplete: false })
+      return
+    }
+
+    let cancelled = false
+    setDupCheck({ status: 'checking', found: 0, incomplete: false })
+    ;(async () => {
+      try {
+        const res = await window.api.qb.findCardPaymentMatches(targetAccount, candidates)
+        if (cancelled) return
+
+        if (!res.success) {
+          // Clear any earlier verdict rather than leave rows held back on the
+          // strength of a check that is no longer standing behind them.
+          setRows((prev) =>
+            prev.map((r) => (r.duplicateOf ? { ...r, duplicateOf: null, excluded: false } : r))
+          )
+          setDupCheck({
+            status: 'failed',
+            found: 0,
+            incomplete: true,
+            message: res.error || 'Could not check QuickBooks'
+          })
+          return
+        }
+
+        const byRow = new Map((res.matches ?? []).map((m) => [m.rowId, m.existing]))
+        setRows((prev) =>
+          prev.map((r) => {
+            const hit = byRow.get(r.id)
+            if (!hit) return r.duplicateOf ? { ...r, duplicateOf: null, excluded: false } : r
+            return {
+              ...r,
+              duplicateOf: {
+                type: hit.type,
+                date: hit.date,
+                refNumber: hit.refNumber,
+                amount: hit.amount,
+                otherAccount: hit.otherAccount
+              },
+              // Default to holding it back; the checkbox puts it back.
+              excluded: true
+            }
+          })
+        )
+        setDupCheck({
+          status: 'done',
+          found: byRow.size,
+          incomplete: Boolean(res.incomplete)
+        })
+      } catch (err) {
+        if (cancelled) return
+        setDupCheck({
+          status: 'failed',
+          found: 0,
+          incomplete: true,
+          message: err instanceof Error ? err.message : 'Could not check QuickBooks'
+        })
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+    // `rows` is intentionally absent: editing a payee or an account must not
+    // re-run five QuickBooks queries, and neither must the setRows above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, effectiveType, targetAccount, qbConnected])
+
   // ── Upload to QuickBooks ─────────────────────────────────────────────────────
 
   const askMyAccountantExists = useMemo(
@@ -359,11 +480,22 @@ export default function LedgerPage() {
     setIsUploading(true)
     try {
       const zeroRows = rows.filter((r) => Math.abs(r.amount) < 0.005)
-      const uncategorized = rows.filter((r) => Math.abs(r.amount) >= 0.005 && !r.account && !askMyAccountantExists)
-      const uploadable = rows.filter((r) => Math.abs(r.amount) >= 0.005 && (r.account || askMyAccountantExists))
+      const held = rows.filter((r) => Math.abs(r.amount) >= 0.005 && r.excluded)
+      const uncategorized = rows.filter(
+        (r) => Math.abs(r.amount) >= 0.005 && !r.excluded && !r.account && !askMyAccountantExists
+      )
+      const uploadable = rows.filter(
+        (r) => Math.abs(r.amount) >= 0.005 && !r.excluded && (r.account || askMyAccountantExists)
+      )
 
       const skipped: UploadOutcome['skipped'] = []
       if (zeroRows.length) skipped.push({ reason: 'zero-amount rows (fee waivers)', count: zeroRows.length })
+      if (held.length) {
+        skipped.push({
+          reason: 'already in QuickBooks (paid from the bank side) — untick a row to upload it anyway',
+          count: held.length
+        })
+      }
       if (uncategorized.length) {
         skipped.push({
           reason: `uncategorized rows ("${ASK_MY_ACCOUNTANT}" account not found in QB — set an account or create it)`,
@@ -479,6 +611,7 @@ export default function LedgerPage() {
     let items = rows
     if (rowFilter === 'review') items = items.filter((r) => r.flags.length > 0)
     if (rowFilter === 'uncategorized') items = items.filter((r) => !r.account)
+    if (rowFilter === 'duplicates') items = items.filter((r) => r.duplicateOf)
     if (search) {
       const q = search.toLowerCase()
       items = items.filter(
@@ -490,6 +623,12 @@ export default function LedgerPage() {
     }
     return items
   }, [rows, rowFilter, search])
+
+  const duplicateCount = rows.filter((r) => r.duplicateOf).length
+  const heldCount = rows.filter((r) => r.excluded).length
+
+  const toggleExcluded = (id: number): void =>
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, excluded: !r.excluded } : r)))
 
   const totalAmount = rows.reduce((s, r) => s + r.amount, 0)
   const positiveTotal = rows.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0)
@@ -733,7 +872,10 @@ export default function LedgerPage() {
                   {([
                     { v: 'all' as const, label: `All (${rows.length})` },
                     { v: 'review' as const, label: `Flagged (${rows.filter((r) => r.flags.length > 0).length})` },
-                    { v: 'uncategorized' as const, label: `No account (${rows.filter((r) => !r.account).length})` }
+                    { v: 'uncategorized' as const, label: `No account (${rows.filter((r) => !r.account).length})` },
+                    ...(duplicateCount
+                      ? [{ v: 'duplicates' as const, label: `Already in QB (${duplicateCount})` }]
+                      : [])
                   ]).map(({ v, label }) => (
                     <button
                       key={v}
@@ -787,6 +929,11 @@ export default function LedgerPage() {
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 z-10 bg-bg-surface">
                     <tr className="border-b border-white/[0.08]">
+                      {duplicateCount > 0 && (
+                        <th className="px-2 py-2.5 text-center font-semibold text-text-muted w-8" title="Tick to upload">
+                          ↑
+                        </th>
+                      )}
                       <th className="px-3 py-2.5 text-left font-semibold text-text-muted w-24">Date</th>
                       <th className="px-3 py-2.5 text-left font-semibold text-text-muted">Payee</th>
                       <th className="px-3 py-2.5 text-left font-semibold text-text-muted w-44">Account</th>
@@ -801,9 +948,28 @@ export default function LedgerPage() {
                         className={cn(
                           'border-b border-white/[0.03] hover:bg-bg-elevated/30 transition-colors',
                           row.flags.includes('sign-review') && 'bg-warning/[0.04]',
-                          row.matchTier === 'exact' && !row.flags.length && 'bg-success/[0.03]'
+                          row.matchTier === 'exact' && !row.flags.length && 'bg-success/[0.03]',
+                          row.duplicateOf && 'bg-primary/[0.05]',
+                          row.excluded && 'opacity-45'
                         )}
                       >
+                        {duplicateCount > 0 && (
+                          <td className="px-2 py-2 text-center">
+                            {row.duplicateOf ? (
+                              <input
+                                type="checkbox"
+                                checked={!row.excluded}
+                                onChange={() => toggleExcluded(row.id)}
+                                className="accent-primary cursor-pointer"
+                                title={
+                                  row.excluded
+                                    ? 'Held back — tick to upload it anyway'
+                                    : 'Will be uploaded'
+                                }
+                              />
+                            ) : null}
+                          </td>
+                        )}
                         <td className="px-3 py-2 text-text-muted font-mono whitespace-nowrap">{row.date}</td>
                         <td className="px-3 py-2 max-w-[220px]">
                           <div className="flex items-center gap-1.5">
@@ -827,6 +993,14 @@ export default function LedgerPage() {
                           )}
                           {row.reviewReason && (
                             <p className="text-[10px] text-warning/80 mt-0.5">{row.reviewReason}</p>
+                          )}
+                          {row.duplicateOf && (
+                            <p className="text-[10px] text-primary/90 mt-0.5">
+                              already in QB · {row.duplicateOf.type}
+                              {row.duplicateOf.refNumber ? ` #${row.duplicateOf.refNumber}` : ''}
+                              {row.duplicateOf.otherAccount ? ` from ${row.duplicateOf.otherAccount}` : ''}
+                              {row.duplicateOf.date ? ` on ${row.duplicateOf.date}` : ''}
+                            </p>
                           )}
                         </td>
                         <td className="px-3 py-2 max-w-[170px]">
@@ -860,6 +1034,26 @@ export default function LedgerPage() {
                   Net <span className={cn('font-semibold font-mono', totalAmount >= 0 ? 'text-success' : 'text-danger')}>{money(totalAmount)}</span>
                   {needsReviewCount > 0 && (
                     <span className="text-warning"> · {needsReviewCount} need attention</span>
+                  )}
+                  {heldCount > 0 && (
+                    <span className="text-primary"> · {heldCount} held back as already in QB</span>
+                  )}
+                  {/* A check that could not run must say so.  Reporting "no
+                      duplicates" on the back of a failed read is the one
+                      outcome worse than not checking at all. */}
+                  {dupCheck.status === 'checking' && (
+                    <span className="text-text-muted"> · checking QuickBooks for duplicates…</span>
+                  )}
+                  {dupCheck.status === 'failed' && (
+                    <span className="text-warning">
+                      {' '}· duplicate check failed ({dupCheck.message}) — verify payments by hand
+                    </span>
+                  )}
+                  {dupCheck.status === 'done' && dupCheck.incomplete && (
+                    <span className="text-warning"> · duplicate check was incomplete — verify payments by hand</span>
+                  )}
+                  {dupCheck.status === 'done' && !dupCheck.incomplete && dupCheck.found === 0 && (
+                    <span className="text-success"> · no payments already in QB</span>
                   )}
                 </div>
 
