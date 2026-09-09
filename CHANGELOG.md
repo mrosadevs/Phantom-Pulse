@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.3.3 — September 9, 2026
 
 **Fixed — credit card charges can be deleted.** The Delete screen sends the
 transaction type QuickBooks asks for by name, and it was sending the label
