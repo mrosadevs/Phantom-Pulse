@@ -16,6 +16,7 @@
 import { parseReport, reportToRows } from '../src/main/qb/reports'
 import { findDuplicates, findUncategorized, find1099Issues, runCloseChecks } from '../src/main/qb/analysis'
 import { findCardPaymentMatches } from '../src/main/qb/cardPayments'
+import { linkReturnedItems, isReturnedItem, receivedDate } from '../src/renderer/src/utils/returnedItems'
 import { cleanTransaction } from '../src/renderer/src/utils/transactionCleaner'
 
 let passed = 0
@@ -484,6 +485,66 @@ const broken = await findCardPaymentMatches(
   { account: CARD, rows: [rowsIn[0]] }
 )
 ok('card: a failed query reports incomplete rather than all-clear', broken.incomplete === true)
+
+
+// ── Returned items ───────────────────────────────────────────────────────────
+
+// The fixture is the real sequence from a client file: an AmEx payment that
+// bounced, the bank's return the next day, and the retry.  Coding the return to
+// Ask My Accountant instead of the card left that file $4,124.17 adrift and
+// unable to reconcile for the rest of the year.
+
+ok('return: bank wording is recognised', isReturnedItem('RETURN OF POSTED CHECK / ITEM (RECEIVED ON 06-17)'))
+ok('return: NSF wording is recognised', isReturnedItem('NSF RETURN ITEM'))
+ok(
+  'return: a merchant refund is NOT a returned item',
+  !isReturnedItem('AMAZON MARKETPLACE NA PA -$38.57') && !isReturnedItem('Purchase return Saks Fifth Avenue')
+)
+ok('return: received-on date is read', receivedDate('RETURN OF POSTED CHECK / ITEM (RECEIVED ON 06-17)', '2025-06-18') === '2025-06-17')
+ok(
+  'return: a received-on date rolls back across new year',
+  receivedDate('RETURN OF POSTED CHECK / ITEM (RECEIVED ON 12-30)', '2026-01-02') === '2025-12-30'
+)
+
+const AMEX_ACCT = 'AMEX'
+const bankRows = [
+  { id: 1, date: '2025-06-17', amount: -1906.4, original: 'AMERICAN EXPRESS DES:ACH PMT ID:M1444', account: AMEX_ACCT, payee: 'AMERICAN EXPRESS' },
+  { id: 2, date: '2025-06-18', amount: 1906.4, original: 'RETURN OF POSTED CHECK / ITEM (RECEIVED ON 06-17)', account: '', payee: '' },
+  { id: 3, date: '2025-06-20', amount: -1906.4, original: 'AMERICAN EXPRESS DES:RETRY PYMT ID:M1444', account: AMEX_ACCT, payee: 'AMERICAN EXPRESS' },
+  { id: 4, date: '2025-06-20', amount: -551.61, original: 'AMERICAN EXPRESS DES:ACH PMT ID:M9022', account: AMEX_ACCT, payee: 'AMERICAN EXPRESS' }
+]
+const linked = linkReturnedItems(bankRows)
+ok('return: the bounced payment is found', linked.length === 1 && linked[0].rowId === 2, JSON.stringify(linked))
+ok('return: it codes back to the card account', linked[0] && linked[0].account === AMEX_ACCT)
+ok(
+  'return: it reverses the ORIGINAL payment, not the retry',
+  linked[0] && linked[0].sourceRowId === 1,
+  'matched row ' + (linked[0] || {}).sourceRowId
+)
+
+// Two identical payments that both bounce are two events; one debit must not
+// be claimed by both returns, or the second return reverses nothing.
+const twoBounces = linkReturnedItems([
+  { id: 1, date: '2025-03-17', amount: -2098.0, original: 'ACH PMT', account: AMEX_ACCT, payee: 'X' },
+  { id: 2, date: '2025-03-18', amount: 2098.0, original: 'RETURN OF POSTED CHECK / ITEM (RECEIVED ON 03-17)', account: '', payee: '' },
+  { id: 3, date: '2025-03-24', amount: -2098.0, original: 'ACH PMT', account: AMEX_ACCT, payee: 'X' },
+  { id: 4, date: '2025-03-25', amount: 2098.0, original: 'RETURN OF POSTED CHECK / ITEM (RECEIVED ON 03-24)', account: '', payee: '' }
+])
+ok('return: two bounces match their own debits', twoBounces.length === 2 && twoBounces[0].sourceRowId === 1 && twoBounces[1].sourceRowId === 3,
+   JSON.stringify(twoBounces.map((l) => [l.rowId, l.sourceRowId])))
+
+// Nothing to reverse: leave it alone rather than inventing a home for it.
+const orphan = linkReturnedItems([
+  { id: 1, date: '2025-06-18', amount: 1906.4, original: 'RETURN OF POSTED CHECK / ITEM (RECEIVED ON 06-17)', account: '', payee: '' }
+])
+ok('return: an unmatched return is left for a person', orphan.length === 0)
+
+// A debit of the same size months earlier is a coincidence, not this event.
+const staleReturn = linkReturnedItems([
+  { id: 1, date: '2025-01-02', amount: -1906.4, original: 'ACH PMT', account: AMEX_ACCT, payee: 'X' },
+  { id: 2, date: '2025-06-18', amount: 1906.4, original: 'RETURN OF POSTED CHECK / ITEM (RECEIVED ON 06-17)', account: '', payee: '' }
+])
+ok('return: a far-off debit of equal size is not matched', staleReturn.length === 0)
 
 
 // ── Summary ──────────────────────────────────────────────────────────────────

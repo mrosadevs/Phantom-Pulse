@@ -24,6 +24,7 @@ import {
   CreditCard,
   Send
 } from 'lucide-react'
+import { linkReturnedItems } from '../../utils/returnedItems'
 import { toast } from 'sonner'
 import { useQBStore } from '../../store/useQBStore'
 import { useHistoryStore } from '../../store/useHistoryStore'
@@ -356,11 +357,32 @@ export default function LedgerPage() {
         }
       })
 
+      // A returned item reverses the payment it names, so it belongs on that
+      // payment's account.  Left to the normal matcher it categorises as
+      // nothing — the bank prints no payee and no category on a return — and a
+      // bounced credit card payment ends up debiting the card without ever
+      // crediting it back, which is a difference that survives every future
+      // reconcile.  See src/renderer/src/utils/returnedItems.ts.
+      const links = linkReturnedItems(result)
+      if (links.length) {
+        const byId = new Map(links.map((l) => [l.rowId, l]))
+        for (const row of result) {
+          const link = byId.get(row.id)
+          if (!link) continue
+          row.account = link.account
+          row.payee = link.payee
+          row.reviewReason = link.note
+          if (!row.flags.includes('returned-item')) row.flags.push('returned-item')
+        }
+      }
+
       setRows(result)
       setStep('review')
       const categorized = result.filter((r) => r.account).length
+      const returned = result.filter((r) => r.flags.includes('returned-item')).length
       toast.success(
-        `${result.length} transactions · ${matched} matched to QB · ${categorized} auto-categorized`
+        `${result.length} transactions · ${matched} matched to QB · ${categorized} auto-categorized` +
+          (returned ? ` · ${returned} returned ${returned === 1 ? 'item' : 'items'} reversed` : '')
       )
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Processing failed')

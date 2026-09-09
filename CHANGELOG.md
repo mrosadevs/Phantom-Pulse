@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+**Fixed — a returned payment now reverses what it paid.** When an ACH payment
+fails, the bank statement carries the event twice: the debit that went out, and
+a credit a day or two later putting the money back. They are one non-event, and
+both halves have to land on the same account or the books are left holding a
+payment that never happened.
+
+Nothing in a return's own description says where it belongs. "RETURN OF POSTED
+CHECK / ITEM (RECEIVED ON 06-17)" names no payee and no category, so it matched
+nothing and fell through to the uncategorised account, while the payment it
+reversed sat in a credit card account. On one file three bounced card payments
+did exactly that: the card was debited $4,124.17 it was never credited back,
+and it would not reconcile against any statement for the rest of the year — the
+kind of difference that survives every future reconcile because nothing about
+it looks wrong on the screen where you would go looking.
+
+A returned item is now matched to the transaction it reverses — same amount,
+opposite direction, anchored to the date the bank prints inside the description
+rather than the date the return itself posted, because the gap between the two
+is whatever the ACH network took — and takes that transaction's account and
+payee. A bounced credit card payment reverses inside the credit card account, a
+bounced vendor payment reverses against the vendor's expense account, and the
+review screen says which payment each one reversed.
+
+A merchant refund is not a returned item and is left alone: "return" on its own
+would drag every purchase refund onto an unrelated debit of the same size. Two
+identical payments that both bounce match their own debits rather than both
+claiming the first. And a return with nothing to reverse is left uncategorised
+for a person, rather than given an invented home.
+
 ## v1.3.4 — September 9, 2026
 
 **New — a card payment already in QuickBooks is no longer uploaded twice.** A
