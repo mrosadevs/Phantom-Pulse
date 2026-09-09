@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.3.5 — September 9, 2026
 
 **Fixed — a returned payment now reverses what it paid.** When an ACH payment
 fails, the bank statement carries the event twice: the debit that went out, and
