@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.3.2 — September 9, 2026
 
 **Fixed — Spanish-language statements are read as statements.** Chase issues
 the same statement in Spanish, and Pulse got it wrong in every way at once. The
