@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.3.6 — September 9, 2026
 
 **Fixed — an account-to-account transfer keeps its direction.** "Online Banking
 transfer from CHK 1234 Confirmation# 4622903680" and the same line saying "to"
