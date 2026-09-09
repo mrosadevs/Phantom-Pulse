@@ -42,9 +42,10 @@ export class QBConnection {
 
     // In both dev and production the process script lands next to index.js in out/main/
     const processPath = join(__dirname, 'qbProcess.js')
-    this.child = utilityProcess.fork(processPath, [], { stdio: 'pipe' })
+    const child = utilityProcess.fork(processPath, [], { stdio: 'pipe' })
+    this.child = child
 
-    this.child.on(
+    child.on(
       'message',
       (msg: {
         type?: string
@@ -72,7 +73,15 @@ export class QBConnection {
       }
     )
 
-    this.child.on('exit', (code) => {
+    child.on('exit', (code) => {
+      // A timed-out request kills its process and forks a replacement, so this
+      // event can arrive for a process we have already moved on from.  Without
+      // this guard the dead process's exit tears down its live successor and
+      // the next request silently forks a THIRD one — several orphaned COM
+      // sessions against the same company file, which is its own way to make
+      // QuickBooks fall over.
+      if (this.child !== child) return
+
       if (code !== 0) {
         // Reject all pending requests — process died unexpectedly
         for (const [id, p] of this.pending) {
@@ -88,7 +97,7 @@ export class QBConnection {
       }
     })
 
-    return this.child
+    return child
   }
 
   /**
@@ -96,6 +105,12 @@ export class QBConnection {
    * @param timeoutMs How long to wait before giving up and killing the process.
    *   Default 30 s. Use 120 000 for connect (user needs time to approve the
    *   QB authorization dialog).
+   *
+   * A timeout here is not a soft failure.  The COM call is synchronous inside
+   * the child, so the only way to get the process back is to kill it — which
+   * takes the whole QuickBooks session with it, mid-write.  The session is
+   * therefore marked disconnected so callers stop the batch rather than firing
+   * the remaining rows at a process that no longer holds a ticket.
    */
   private send<T>(cmd: string, args?: Record<string, string>, timeoutMs = 30_000): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -106,13 +121,19 @@ export class QBConnection {
         // Kill the child process to unblock any hanging COM call
         this.child?.kill()
         this.child = null
+        this.status = {
+          connected: false,
+          mode: 'disconnected',
+          error: 'Timed out waiting for QuickBooks'
+        }
         reject(
           new Error(
             'Timed out waiting for QuickBooks.\n\n' +
               'Common causes:\n' +
               '• No company file is open in QuickBooks (you see a grey/empty workspace) — open your .qbw file first\n' +
               '• The "Phantom Pulse" authorization dialog appeared in QuickBooks but was missed — check the QB taskbar button\n' +
-              '• Edit → Preferences → Integrated Applications: make sure "Don\'t allow any applications..." is UNCHECKED'
+              '• Edit → Preferences → Integrated Applications: make sure "Don\'t allow any applications..." is UNCHECKED\n' +
+              '• QuickBooks put a modal dialog in front of the write (a backup reminder, "another user is in single-user mode", an update prompt) — clear it in QB and run the batch again'
           )
         )
       }, timeoutMs)
@@ -202,11 +223,20 @@ export class QBConnection {
   }
 
   /**
-   * @param timeoutMs Override the 30 s default.  Report queries need it: a
-   *   General Ledger over several years is a genuinely long computation inside
+   * @param timeoutMs Override the default.  Report queries need it: a General
+   *   Ledger over several years is a genuinely long computation inside
    *   QuickBooks, and the range cannot be split without breaking the subtotals.
+   *
+   * The default is 3 minutes, not the 30 s used for process-level commands.
+   * 30 s is under what a single Add can legitimately take against a large
+   * company file — the first write after the file is opened, one landing while
+   * QuickBooks is rebuilding an index, or any write QB stalls behind a modal
+   * dialog.  Tripping the timer there killed the session in the middle of a
+   * batch: the rows already written stayed in the file, the row in flight may
+   * or may not have committed, and QuickBooks was left holding a request whose
+   * caller had vanished — which is what took QuickBooks down with it.
    */
-  async sendRequest(qbXML: string, timeoutMs?: number): Promise<string> {
+  async sendRequest(qbXML: string, timeoutMs = 180_000): Promise<string> {
     if (!this.status.connected) {
       throw new Error('Not connected to QuickBooks Desktop')
     }

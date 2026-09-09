@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+**Fixed — credit card charges can be deleted.** The Delete screen sends the
+transaction type QuickBooks asks for by name, and it was sending the label
+shown in the dropdown rather than the name the SDK accepts: "Credit Card
+Charge" where QuickBooks wants "CreditCardCharge". QuickBooks rejected the
+whole request as malformed, so nothing was deleted and the reason given back
+was the generic parsing error. It applied to one transaction exactly as it
+applied to a hundred. Every multi-word type was affected — credit card charges
+and credits, journal entries, bill payments, sales receipts, purchase orders —
+while checks, bills and deposits worked, because for those the label and the
+SDK name happen to be the same word. Finding and exporting those types was
+never affected, which is why the screen could list transactions it then refused
+to delete.
+
+**Fixed — a slow write no longer takes QuickBooks down mid-import.** Pulse gave
+each write thirty seconds and, when that ran out, killed the connection to get
+control back. Thirty seconds is less than a single transaction can honestly
+take against a large company file — the first write after the file is opened,
+one arriving while QuickBooks is rebuilding an index, or any write QuickBooks
+parks behind a dialog of its own. QuickBooks was then left holding a request
+whose caller had vanished, which is what crashed it, and the import stopped
+partway with the rows written so far still in the file. Writes now have three
+minutes, which is longer than the slow cases and still short enough to report a
+genuine hang.
+
+**Fixed — an interrupted import stops instead of failing every remaining row.**
+Once the connection was lost, Pulse kept sending the rest of the batch into it
+and reported each row as its own failure, burying the one error that mattered.
+A lost connection now ends the run and says so plainly, naming the rows that
+were never attempted so it is clear what still has to be imported.
+
+**Fixed — payees survive a retry.** Names QuickBooks had accepted or refused
+were remembered for as long as Pulse stayed open, and a name that failed only
+because the connection dropped was remembered as refused. Re-running the import
+without restarting Pulse booked those rows with no payee at all, silently. What
+QuickBooks said about a name is no longer remembered past the run it was said
+in, and a name that never reached QuickBooks is not treated as an answer.
+
 ## v1.3.2 — September 9, 2026
 
 **Fixed — Spanish-language statements are read as statements.** Chase issues

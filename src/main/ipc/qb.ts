@@ -6,7 +6,8 @@ import {
   parseQBXMLResponse,
   buildAccountAddXML,
   buildCustomerAddXML,
-  buildVendorAddXML
+  buildVendorAddXML,
+  TX_TYPE_MAP
 } from '../qb/qbxml'
 import { importTransactions } from '../qb/importer'
 import { exportTransactions } from '../qb/exporter'
@@ -114,10 +115,33 @@ export function registerQBHandlers(ipcMain: IpcMain): void {
         return { success: false, error: 'Not connected to QuickBooks Desktop' }
       }
 
+      // TxnDelType is a qbXML enum, not the label the UI shows.  The screens
+      // work in display names ("Credit Card Charge"), and sending one straight
+      // through produced <TxnDelType>Credit Card Charge</TxnDelType>, which
+      // QuickBooks rejects — so every multi-word type failed to delete while
+      // the single-word ones (Check, Bill, Deposit) happened to work, because
+      // for those the label and the enum are the same string.  The query path
+      // already maps through TX_TYPE_MAP; this one now does too.
+      const delType = TX_TYPE_MAP[txnType]?.del
+      if (!delType) {
+        return { success: false, error: `Pulse cannot delete a ${txnType}.` }
+      }
+
       const results: { txnId: string; success: boolean; error?: string }[] = []
       for (const txnId of txnIds) {
+        // A dead session cannot delete anything, and firing the rest of the
+        // batch at it buries the real error under a wall of identical ones.
+        if (!qbConnection.isConnected()) {
+          results.push({
+            txnId,
+            success: false,
+            error: 'Lost the QuickBooks connection — reconnect and delete the rest.'
+          })
+          continue
+        }
+
         try {
-          const xml = buildQBXMLRequest('TxnDelRq', { TxnDelType: txnType, TxnID: txnId })
+          const xml = buildQBXMLRequest('TxnDelRq', { TxnDelType: delType, TxnID: txnId })
           const response = await qbConnection.sendRequest(xml)
           const parsed = parseQBXMLResponse(response)
           results.push({
@@ -128,6 +152,10 @@ export function registerQBHandlers(ipcMain: IpcMain): void {
         } catch (e: unknown) {
           results.push({ txnId, success: false, error: e instanceof Error ? e.message : String(e) })
         }
+
+        // Same pause the other write loops use — QuickBooks is unhappy when
+        // writes arrive back to back with no gap.
+        await new Promise((r) => setTimeout(r, 50))
       }
       return { success: true, results }
     } catch (err: unknown) {

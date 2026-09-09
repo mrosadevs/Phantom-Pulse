@@ -27,13 +27,28 @@ export interface ImportResult {
   row: Record<string, string>
 }
 
-// Track which names we've already tried to create this session
-// so we don't spam QB with duplicate add requests
+// Track which names we've already created during THIS import run so we don't
+// spam QB with duplicate add requests.
+//
+// Deliberately cleared per run rather than kept for the life of the app.  A
+// run that dies partway (a timeout kills the COM session, QuickBooks is
+// restarted) leaves entries behind that are no longer true of the company file
+// in front of us — and the entries that mattered most were the failures: a name
+// recorded as unusable because the *connection* dropped stayed unusable, so on
+// the retry those rows were booked with their payee silently stripped.  Re-
+// asking QuickBooks costs one round trip per unique name and QB answers 3100
+// immediately for anything that already exists.
 const createdCustomers = new Set<string>()
 const createdVendors = new Set<string>()
 
 /** Names QuickBooks refused to create — their rows are booked without a payee. */
 const unusableNames = new Set<string>()
+
+function resetEntityCache(): void {
+  createdCustomers.clear()
+  createdVendors.clear()
+  unusableNames.clear()
+}
 
 /** Fields a payee name can arrive in. */
 const NAME_FIELDS = ['Payee', 'Customer', 'Vendor', 'Entity']
@@ -64,11 +79,11 @@ export function sanitizeEntityName(name: string): string {
 async function ensureCustomer(conn: QBConnection, name: string): Promise<boolean> {
   if (!name) return false
   if (createdCustomers.has(name)) return !unusableNames.has(name)
-  createdCustomers.add(name)
   try {
     const xml = buildCustomerAddXML(name, `cust_${Date.now()}`)
     const response = await conn.sendRequest(xml)
     const parsed = parseQBXMLResponse(response)
+    createdCustomers.add(name)
     // 3100 = "already in use" — that's fine, entity already exists
     if (parsed.statusCode !== '0' && parsed.statusCode !== '3100') {
       console.log(`[Auto-create customer] "${name}": ${parsed.statusMessage}`)
@@ -77,7 +92,9 @@ async function ensureCustomer(conn: QBConnection, name: string): Promise<boolean
     }
     return true
   } catch {
-    unusableNames.add(name)
+    // The request never reached QuickBooks, so we learned nothing about the
+    // name — record no verdict.  Marking it unusable here is what dropped
+    // payees off the rows of a retried batch.
     return false
   }
 }
@@ -89,11 +106,11 @@ async function ensureCustomer(conn: QBConnection, name: string): Promise<boolean
 async function ensureVendor(conn: QBConnection, name: string): Promise<boolean> {
   if (!name) return false
   if (createdVendors.has(name)) return !unusableNames.has(name)
-  createdVendors.add(name)
   try {
     const xml = buildVendorAddXML(name, `vend_${Date.now()}`)
     const response = await conn.sendRequest(xml)
     const parsed = parseQBXMLResponse(response)
+    createdVendors.add(name)
     if (parsed.statusCode !== '0' && parsed.statusCode !== '3100') {
       console.log(`[Auto-create vendor] "${name}": ${parsed.statusMessage}`)
       unusableNames.add(name)
@@ -101,7 +118,7 @@ async function ensureVendor(conn: QBConnection, name: string): Promise<boolean> 
     }
     return true
   } catch {
-    unusableNames.add(name)
+    // See ensureCustomer: a transport failure is not a verdict on the name.
     return false
   }
 }
@@ -133,6 +150,11 @@ export async function importTransactions(
 ): Promise<ImportResult[]> {
   const results: ImportResult[] = []
 
+  resetEntityCache()
+
+  /** The batch is over the moment the COM session goes; see the loops below. */
+  const lost = 'Lost the QuickBooks connection partway through. Nothing after this row was sent — reconnect, then import the remaining rows.'
+
   // Determine which entity type to auto-create based on transaction type
   const customerTypes = ['Deposit', 'Invoice', 'Sales Receipt', 'Receive Payment', 'Credit Memo', 'Estimate']
   const vendorTypes = ['Check', 'Bill', 'Bill Payment', 'Purchase Order', 'Credit Card Charge', 'Credit Card Credit']
@@ -150,6 +172,10 @@ export async function importTransactions(
 
   for (const [raw, entry] of usableByRaw) {
     if (!entry.name) continue
+    // Stop the pre-pass on a dead session rather than grinding through it.
+    // Every remaining ensure* would fail, every row would come out marked
+    // "payee unusable", and the whole batch would then book with no payees.
+    if (!conn.isConnected()) break
     if (customerTypes.includes(type)) {
       entry.usable = await ensureCustomer(conn, entry.name)
     } else if (vendorTypes.includes(type)) {
@@ -160,7 +186,22 @@ export async function importTransactions(
     usableByRaw.set(raw, entry)
   }
 
+  if (!conn.isConnected()) {
+    return transactions.map((row, rowIndex) => ({ rowIndex, success: false, error: lost, row }))
+  }
+
   for (let i = 0; i < transactions.length; i++) {
+    // A timeout kills the COM session, and the replacement process has no
+    // ticket — so every remaining row would fail with a misleading "Not
+    // connected" of its own.  Report the real cause once and mark the rest as
+    // not attempted, which is what the operator needs to know to finish the job.
+    if (i > 0 && !conn.isConnected()) {
+      for (let j = i; j < transactions.length; j++) {
+        results.push({ rowIndex: j, success: false, error: lost, row: transactions[j] })
+      }
+      break
+    }
+
     const raw = getPayeeName(transactions[i])
     const resolved = raw ? usableByRaw.get(raw) : undefined
     const row = resolved
@@ -201,6 +242,11 @@ export async function importTransactions(
         row
       })
     }
+
+    // The same pause the other write loops use.  QuickBooks is unhappy when
+    // writes arrive back to back with no gap — the comment in bulk.ts credits
+    // this path with the pause, but this path never actually had one.
+    await new Promise((r) => setTimeout(r, 50))
   }
 
   return results
