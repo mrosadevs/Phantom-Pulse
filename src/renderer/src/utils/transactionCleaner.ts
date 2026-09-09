@@ -320,6 +320,25 @@ export function cleanTransaction(raw: string, options: CleanOptions = {}): strin
     return 'Wire Out'
   }
 
+  // ── WIRE TYPE:FX IN / FX OUT ──
+  //
+  // A foreign-exchange wire, and the one wire format that carries no
+  // counterparty at all: "WIRE TYPE:FX OUT DATE:251219 TIME:1304 ET
+  // TRN:2025121800462671 FX:MXN 94335.22" is a trace record and nothing else.
+  // Falling through to the generic path turned that into the payee
+  // "Date:251219 Time:1304 Et Trn:2025121800462671 Fx:mxn 94335.22", which is
+  // not a name, cannot match a QuickBooks list, and differs on every row so
+  // the rows cannot even be corrected as a group.  Name the instrument
+  // instead: it is honest, and identical across the rows, so one bulk edit
+  // fixes the lot.
+  if (/^WIRE TYPE:FX\s+(?:IN|OUT)/i.test(m)) {
+    const named = m.match(/(?:BNF|ORIG):(.+?)\s+(?:ID|BNF|ORIG|DATE):/i)
+    if (named) return titleCase(named[1].trim())
+    const currency = m.match(/FX:([A-Z]{3})\b/)
+    const direction = /FX\s+OUT/i.test(m) ? 'Out' : 'In'
+    return currency ? `FX Wire ${direction} (${currency[1]})` : `FX Wire ${direction}`
+  }
+
   // ── WT Fed# (Chase wire format) ──
   // Examples: "WT Fed#02946 Bank of America /Org=1/Gizel Anabel → Gizel Anabel"
   //           "WT Fed#01328 National Bank /Ftr/Bnf=Nicolas Jose → Nicolas Jose"
@@ -436,6 +455,21 @@ export function cleanTransaction(raw: string, options: CleanOptions = {}): strin
   if (/^TRANSFER .+Confirmation#/i.test(m)) {
     const tfr = m.match(/^TRANSFER (.+?):(.+?)\s+Confirmation#/i)
     if (tfr) return `${titleCase(tfr[1].trim())} to ${titleCase(tfr[2].trim())}`
+  }
+
+  // ── Online Banking transfer to/from one of the client's own accounts ──
+  //
+  // "Online Banking transfer from CHK 1234 Confirmation# 4622903680" is a
+  // transfer between two accounts the client owns, and both halves of it used
+  // to come out as "Chk 1234 Confirmation#": the confirmation label survived
+  // because the generic rule strips "conf#" but not "confirmation#", and —
+  // worse — the direction was thrown away, so money in and money out landed on
+  // one identical name.  A name that cannot tell a deposit from a withdrawal
+  // matches nothing useful and hides the fact that these are transfers, not
+  // spending.
+  const ownAccount = internalTransfer(m)
+  if (ownAccount) {
+    return `Transfer ${ownAccount.direction} ${ownAccount.account}`
   }
 
   // ── Online Banking payment to CRD ──
@@ -806,5 +840,59 @@ export function cleanAndNormalizeTransaction(raw: string): string {
 export function cleanTransactionCandidates(raw: string): string[] {
   const display = cleanAndNormalizeTransaction(raw)
   const asPrinted = cleanTransaction(raw, { normalize: false })
-  return display === asPrinted ? [display] : [display, asPrinted]
+  const out = display === asPrinted ? [display] : [display, asPrinted]
+
+  // An account-to-account transfer is already named in the client's file, and
+  // there is no telling which spelling they used — "Transfer from CHK 1234",
+  // "Transfer From Chk #1234" and plain "CHK 1234" are all in the wild, and
+  // picking one would leave the other two unmatched.  The matcher already
+  // tries candidates in order, so offer the spellings rather than guess.
+  const own = internalTransfer(raw.toUpperCase())
+  if (own) {
+    for (const variant of transferNameVariants(own)) {
+      if (!out.includes(variant)) out.push(variant)
+    }
+  }
+
+  return out
+}
+
+/** A transfer between two accounts the client owns. */
+export interface InternalTransfer {
+  direction: 'to' | 'from'
+  /** The bank's own label for the other account, e.g. "CHK 1234". */
+  account: string
+}
+
+/**
+ * Read an online-banking transfer between the client's own accounts.
+ *
+ * Anchored on the account tag and number, so everything the bank appends —
+ * "Confirmation# 4622903680", a running balance, a reference — is ignored
+ * rather than becoming part of the name.
+ */
+export function internalTransfer(description: string): InternalTransfer | null {
+  const m = description.match(
+    /\bonline\s+banking\s+transfer\s+(to|from)\s+([A-Za-z]{2,4})\s*#?\s*(\d{3,})/i
+  )
+  if (!m) return null
+  return {
+    direction: m[1].toLowerCase() === 'to' ? 'to' : 'from',
+    account: `${m[2].toUpperCase()} ${m[3]}`
+  }
+}
+
+/** The spellings a client's QuickBooks list might carry for a transfer. */
+export function transferNameVariants(t: InternalTransfer): string[] {
+  const dir = t.direction
+  const Dir = dir === 'to' ? 'To' : 'From'
+  const [label, number] = t.account.split(' ')
+  const pretty = `${titleCase(label)} #${number}`
+  return [
+    `Transfer ${dir} ${t.account}`,
+    `Transfer ${Dir} ${pretty}`,
+    `Transfer ${dir} ${pretty}`,
+    t.account,
+    pretty
+  ]
 }

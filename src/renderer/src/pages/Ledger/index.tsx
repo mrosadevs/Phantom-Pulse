@@ -186,6 +186,9 @@ export default function LedgerPage() {
   const [historyCoverage, setHistoryCoverage] = useState<{ scanned: number; withHistory: number } | null>(null)
   const [search, setSearch] = useState('')
   const [rowFilter, setRowFilter] = useState<'all' | 'review' | 'uncategorized' | 'duplicates'>('all')
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [bulkPayee, setBulkPayee] = useState('')
+  const [bulkAccount, setBulkAccount] = useState('')
   const [isUploading, setIsUploading] = useState(false)
   const [outcome, setOutcome] = useState<UploadOutcome | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -652,6 +655,67 @@ export default function LedgerPage() {
   const toggleExcluded = (id: number): void =>
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, excluded: !r.excluded } : r)))
 
+  // ── Bulk edit ──────────────────────────────────────────────────────────────
+  //
+  // Statement lines that name no counterparty arrive in groups, not one at a
+  // time: a month of FX wires all clean to the same "FX Wire Out (MXN)", every
+  // internal transfer to the same "Transfer to CHK 1234".  The matcher cannot
+  // help with any of them — there is no merchant to recognise — so they land
+  // uncategorised, and correcting them a row at a time is the slowest work in
+  // the app for the rows where the answer is most obvious and most repeated.
+  //
+  // Select and set, so one decision covers the group.  Filter or search first
+  // and "select all" follows the filter, which is what makes it quick: search
+  // "1234", select all, set the account once.
+  const toggleSelected = (id: number): void =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const selectedVisible = filtered.filter((r) => selectedIds.has(r.id)).length
+  const allVisibleSelected = filtered.length > 0 && selectedVisible === filtered.length
+
+  const toggleSelectAllVisible = (): void =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (allVisibleSelected) for (const r of filtered) next.delete(r.id)
+      else for (const r of filtered) next.add(r.id)
+      return next
+    })
+
+  /**
+   * Apply the typed payee and/or account to every selected row.
+   *
+   * A blank field is left alone rather than written as an empty string — the
+   * point is to set one field across a group without wiping the other.
+   */
+  const applyBulk = (): void => {
+    const payee = bulkPayee.trim()
+    const account = bulkAccount.trim()
+    if (!payee && !account) {
+      toast.error('Type a payee or pick an account to apply.')
+      return
+    }
+    const count = selectedIds.size
+    setRows((prev) =>
+      prev.map((r) => {
+        if (!selectedIds.has(r.id)) return r
+        return { ...r, payee: payee || r.payee, account: account || r.account }
+      })
+    )
+    setSelectedIds(new Set())
+    setBulkPayee('')
+    setBulkAccount('')
+    toast.success(
+      `Updated ${count} ${count === 1 ? 'row' : 'rows'}` +
+        (account ? ` · account ${account}` : '') +
+        (payee ? ` · payee ${payee}` : '')
+    )
+  }
+
   const totalAmount = rows.reduce((s, r) => s + r.amount, 0)
   const positiveTotal = rows.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0)
   const negativeTotal = rows.filter((r) => r.amount < 0).reduce((s, r) => s + r.amount, 0)
@@ -946,11 +1010,69 @@ export default function LedgerPage() {
                 <div className="ml-auto text-xs text-text-muted">{filtered.length} rows</div>
               </div>
 
+              {/* Bulk edit — one decision for a group of rows the matcher cannot help with */}
+              {selectedIds.size > 0 && (
+                <div className="px-6 py-2 border-b border-primary/20 bg-primary/[0.06] flex items-center gap-2 flex-wrap flex-shrink-0">
+                  <span className="text-xs font-semibold text-primary whitespace-nowrap">
+                    {selectedIds.size} selected
+                  </span>
+                  <input
+                    value={bulkPayee}
+                    onChange={(e) => setBulkPayee(e.target.value)}
+                    placeholder="Set payee…"
+                    className="text-xs bg-bg-elevated border border-white/[0.1] rounded-lg px-2.5 py-1.5 text-text-primary outline-none focus:border-primary/40 w-44"
+                  />
+                  <input
+                    value={bulkAccount}
+                    onChange={(e) => setBulkAccount(e.target.value)}
+                    placeholder="Set account…"
+                    list="qb-account-list"
+                    className="text-xs bg-bg-elevated border border-white/[0.1] rounded-lg px-2.5 py-1.5 text-text-primary outline-none focus:border-primary/40 w-56"
+                  />
+                  {/* Free text with suggestions rather than a closed dropdown: the
+                      account may be one Pulse has not loaded, and typing is faster
+                      than hunting a long chart of accounts. */}
+                  <datalist id="qb-account-list">
+                    {qbAccounts.map((a) => (
+                      <option key={a.fullName} value={a.fullName} />
+                    ))}
+                  </datalist>
+                  <button
+                    onClick={applyBulk}
+                    className="btn-primary text-xs py-1.5 px-4 flex items-center gap-1.5"
+                  >
+                    <Check size={13} /> Apply to {selectedIds.size}
+                  </button>
+                  <button
+                    onClick={() => setSelectedIds(new Set())}
+                    className="text-xs text-text-muted hover:text-text-primary px-2 py-1.5"
+                  >
+                    Clear
+                  </button>
+                  <span className="text-[11px] text-text-disabled ml-auto">
+                    Blank fields are left as they are · search or filter first, then select all
+                  </span>
+                </div>
+              )}
+
               {/* Table */}
               <div className="flex-1 overflow-auto px-4 py-2">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 z-10 bg-bg-surface">
                     <tr className="border-b border-white/[0.08]">
+                      <th className="px-2 py-2.5 text-center font-semibold text-text-muted w-8">
+                        <input
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          onChange={toggleSelectAllVisible}
+                          className="accent-primary cursor-pointer"
+                          title={
+                            allVisibleSelected
+                              ? 'Clear selection'
+                              : `Select all ${filtered.length} shown`
+                          }
+                        />
+                      </th>
                       {duplicateCount > 0 && (
                         <th className="px-2 py-2.5 text-center font-semibold text-text-muted w-8" title="Tick to upload">
                           ↑
@@ -972,9 +1094,18 @@ export default function LedgerPage() {
                           row.flags.includes('sign-review') && 'bg-warning/[0.04]',
                           row.matchTier === 'exact' && !row.flags.length && 'bg-success/[0.03]',
                           row.duplicateOf && 'bg-primary/[0.05]',
-                          row.excluded && 'opacity-45'
+                          row.excluded && 'opacity-45',
+                          selectedIds.has(row.id) && 'bg-primary/[0.12]'
                         )}
                       >
+                        <td className="px-2 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(row.id)}
+                            onChange={() => toggleSelected(row.id)}
+                            className="accent-primary cursor-pointer"
+                          />
+                        </td>
                         {duplicateCount > 0 && (
                           <td className="px-2 py-2 text-center">
                             {row.duplicateOf ? (

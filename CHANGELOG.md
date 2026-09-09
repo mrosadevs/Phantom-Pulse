@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased
+
+**Fixed — an account-to-account transfer keeps its direction.** "Online Banking
+transfer from CHK 1234 Confirmation# 4622903680" and the same line saying "to"
+both arrived as one payee, "Chk 1234 Confirmation#": the confirmation label
+survived because the rule strips "conf#" but not "confirmation#", and the
+direction was thrown away entirely. A name that cannot tell a deposit from a
+withdrawal matches nothing useful and hides the fact that these are transfers
+rather than spending, so every one of them landed uncategorised and had to be
+retyped by hand. They now read "Transfer to CHK 1234" and "Transfer from CHK
+1234", and because there is no telling which spelling a client's file already
+uses, the matcher is offered several — "Transfer From Chk #1234" and the bare
+account among them — instead of betting on one.
+
+**Fixed — an FX wire is named by what it is.** A foreign-exchange wire carries
+a trace record and no counterparty at all, and it used to become the payee
+"Date:251219 Time:1304 Et Trn:2025121800462671 Fx:mxn 94335.22" — not a name,
+unmatchable, and different on every row, so a month of them could not even be
+corrected as a group. They now read "FX Wire Out (MXN)", the same on every row.
+Where a wire does name a beneficiary, the beneficiary still wins.
+
+**New — set the payee and account on many rows at once.** The rows the matcher
+cannot help with are exactly the ones that arrive in groups: a month of wires,
+every transfer between two of the client's own accounts. There is no merchant
+to recognise in any of them, so they all land uncategorised, and correcting
+them one at a time was the slowest work in the app for the rows whose answer is
+the most obvious and the most repeated.
+
+The review screen now has a checkbox on each row and one in the header that
+follows whatever is on screen, so filtering or searching first and then
+selecting all is the quick path: search the account number, select all, set the
+account once. A blank field is left alone, so an account can be applied across
+a group without disturbing payees that are already right.
+
+**Fixed — a statement's own cards are no longer read as separate accounts.**
+Tracks the shared parser at v1.1.5. A business card statement names the account
+in full and then names each employee card, and an account number printed in
+groups was being cut at the first space — so "Account Number: 4339 9311 1938
+2141" yielded "4339", the issuer prefix that is identical on every card the
+bank issues, while the digits that identify the account were discarded. The
+full number and a four-digit employee card then competed for primary, the
+tiebreak was alphabetical, and it resolved differently from one statement to
+the next. A batch of one account's own statements was rejected as coming from
+two accounts.
+
+**Fixed — a two-column statement reconciles.** Also in the parser: every
+balance label is anchored to the start of its line, which is correct, because
+an unanchored "new balance" matches the sentence explaining how the new balance
+is calculated. But some statements print two labelled figures on one line —
+"New Balance Total ..... $1,863.84  Previous Balance ..... $0.00" — and only
+the first was ever read. The opening balance was never found on those
+statements, the balance chain could not close, and every file in the batch
+reported a totals mismatch against figures printed on the page that did agree.
+
 ## v1.3.5 — September 9, 2026
 
 **Fixed — a returned payment now reverses what it paid.** When an ACH payment

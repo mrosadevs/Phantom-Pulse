@@ -17,7 +17,7 @@ import { parseReport, reportToRows } from '../src/main/qb/reports'
 import { findDuplicates, findUncategorized, find1099Issues, runCloseChecks } from '../src/main/qb/analysis'
 import { findCardPaymentMatches } from '../src/main/qb/cardPayments'
 import { linkReturnedItems, isReturnedItem, receivedDate } from '../src/renderer/src/utils/returnedItems'
-import { cleanTransaction } from '../src/renderer/src/utils/transactionCleaner'
+import { cleanTransaction, cleanTransactionCandidates } from '../src/renderer/src/utils/transactionCleaner'
 
 let passed = 0
 let failed = 0
@@ -545,6 +545,55 @@ const staleReturn = linkReturnedItems([
   { id: 2, date: '2025-06-18', amount: 1906.4, original: 'RETURN OF POSTED CHECK / ITEM (RECEIVED ON 06-17)', account: '', payee: '' }
 ])
 ok('return: a far-off debit of equal size is not matched', staleReturn.length === 0)
+
+
+// --- Internal transfers and FX wires ---------------------------------------
+//
+// Neither names a counterparty, so the matcher can never help; what matters is
+// that the name is stable, tells the two directions apart, and carries no
+// noise, because these rows are corrected as a group rather than one at a time.
+
+const TRANSFER_CASES = [
+  ['Online Banking transfer from CHK 1234 Confirmation# 4622903680', 'Transfer from CHK 1234'],
+  ['Online Banking transfer to CHK 1234 Confirmation# 4590015867', 'Transfer to CHK 1234'],
+  ['Online Banking transfer to SAV 5678 Confirmation# 1234567890', 'Transfer to SAV 5678']
+]
+for (const [raw, want] of TRANSFER_CASES) {
+  const got = cleanTransaction(raw)
+  ok(`transfer: ${want}`, got === want, `got "${got}"`)
+}
+
+ok(
+  'transfer: the two directions do not collapse to one name',
+  cleanTransaction('Online Banking transfer to CHK 1234 Confirmation# 1') !==
+    cleanTransaction('Online Banking transfer from CHK 1234 Confirmation# 1')
+)
+ok(
+  'transfer: the confirmation label is not part of the name',
+  !/confirmation/i.test(cleanTransaction('Online Banking transfer from CHK 1234 Confirmation# 4622903680'))
+)
+
+// The client's file already names these; which spelling is anyone's guess, so
+// the candidates cover the ones in the wild rather than betting on one.
+const variants = cleanTransactionCandidates('Online Banking transfer from CHK 1234 Confirmation# 4622903680')
+ok('transfer: candidates offer the "#" spelling too', variants.includes('Transfer From Chk #1234'), JSON.stringify(variants))
+ok('transfer: candidates offer the bare account', variants.includes('CHK 1234'), JSON.stringify(variants))
+
+// An FX wire carries a trace record and no beneficiary at all.  The old output
+// was "Date:251219 Time:1304 Et Trn:2025121800462671 Fx:mxn 94335.22" — not a
+// name, and different on every row, so the rows could not even be fixed as a
+// group.
+const FX = 'WIRE TYPE:FX OUT DATE:251219 TIME:1304 ET TRN:2025121800462671 FX:MXN 94335.22'
+ok('fx wire: named by instrument, not by its trace record', cleanTransaction(FX) === 'FX Wire Out (MXN)', `got "${cleanTransaction(FX)}"`)
+ok(
+  'fx wire: every row of a month shares one name',
+  cleanTransaction(FX) ===
+    cleanTransaction('WIRE TYPE:FX OUT DATE:251224 TIME:1710 ET TRN:2025122200789471 FX:MXN 37231.91')
+)
+ok(
+  'fx wire: a named beneficiary still wins over the instrument',
+  cleanTransaction('WIRE TYPE:FX OUT BNF:ACME TOOLING SA ID:998877 DATE:251219') === 'Acme Tooling Sa'
+)
 
 
 // ── Summary ──────────────────────────────────────────────────────────────────
