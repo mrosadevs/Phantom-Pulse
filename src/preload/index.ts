@@ -50,8 +50,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('qb:importTransactions', transactions, type),
     exportTransactions: (type: string, filters: unknown) =>
       ipcRenderer.invoke('qb:exportTransactions', type, filters),
-    deleteTransactions: (txnIds: string[], txnType: string) =>
-      ipcRenderer.invoke('qb:deleteTransactions', txnIds, txnType),
+    deleteTransactions: (txnIds: string[], txnType: string, expectedCompany?: string) =>
+      ipcRenderer.invoke('qb:deleteTransactions', txnIds, txnType, expectedCompany),
     getCompanyInfo: () => ipcRenderer.invoke('qb:getCompanyInfo'),
     getAccounts: () => ipcRenderer.invoke('qb:getAccounts'),
     getCustomers: () => ipcRenderer.invoke('qb:getCustomers'),

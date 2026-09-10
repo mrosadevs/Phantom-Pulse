@@ -247,6 +247,38 @@ export class QBConnection {
     return this.status.connected && this.status.mode === 'qbsdk'
   }
 
+  /**
+   * Which company file the session is actually talking to, right now.
+   *
+   * `isConnected` reports a cached flag, and the cache cannot know that
+   * QuickBooks has been pointed at a different company since — the session is
+   * opened with BeginSession('') against whatever file is open, so switching
+   * files in QuickBooks silently changes what every later request means.  A
+   * bookkeeper works across several client files in an afternoon, and a list
+   * queried from one of them is meaningless against another: every TxnID in it
+   * belongs to a file that is no longer there, so a whole batch fails at once
+   * with QuickBooks quite correctly saying it cannot find them.
+   *
+   * This asks the file itself rather than trusting the flag, so a write can be
+   * refused before it is attempted rather than explained afterwards.
+   */
+  async currentCompany(): Promise<string | null> {
+    if (!this.isConnected()) return null
+    try {
+      const xml =
+        `<?xml version="1.0" encoding="utf-8"?><?qbxml version="13.0"?><QBXML>` +
+        `<QBXMLMsgsRq onError="continueOnError"><CompanyQueryRq requestID="whoami" /></QBXMLMsgsRq>` +
+        `</QBXML>`
+      const resp = await this.sendRequest(xml, 30_000)
+      const name = resp.match(/<CompanyName>([^<]*)<\/CompanyName>/)?.[1]?.trim()
+      const file = resp.match(/<CompanyFileName>([^<]*)<\/CompanyFileName>/)?.[1]?.trim()
+      return file || name || null
+    } catch {
+      // A failure here is itself the answer: the session is not usable.
+      return null
+    }
+  }
+
   getStatus(): QBStatus {
     return this.status
   }

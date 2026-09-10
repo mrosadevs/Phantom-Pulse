@@ -104,17 +104,44 @@ export function registerQBHandlers(ipcMain: IpcMain): void {
         return { success: false, error: 'Not connected to QuickBooks Desktop' }
       }
       const data = await exportTransactions(qbConnection, type, filters as Record<string, string>)
-      return { success: true, data }
+      // Stamp which company file these rows came from.  TxnIDs mean nothing in
+      // another file, and a bookkeeper switches files all day.
+      const company = await qbConnection.currentCompany()
+      return { success: true, data, company }
     } catch (err: unknown) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 
   // Delete transactions
-  ipcMain.handle('qb:deleteTransactions', async (_, txnIds: string[], txnType: string) => {
+  ipcMain.handle(
+    'qb:deleteTransactions',
+    async (_, txnIds: string[], txnType: string, expectedCompany?: string) => {
     try {
       if (!qbConnection.isConnected()) {
         return { success: false, error: 'Not connected to QuickBooks Desktop' }
+      }
+
+      // Ask the file who it is before writing to it.  isConnected() is a cached
+      // flag that cannot know QuickBooks has been switched to another company
+      // since the list was queried — and against the wrong file every single
+      // row fails, which is indistinguishable from the tool being broken.
+      const company = await qbConnection.currentCompany()
+      if (!company) {
+        return {
+          success: false,
+          error:
+            'Lost the QuickBooks session. Reconnect in Settings, re-run the query, then delete.'
+        }
+      }
+      if (expectedCompany && expectedCompany !== company) {
+        return {
+          success: false,
+          error:
+            `These rows were found in "${expectedCompany}" but QuickBooks now has ` +
+            `"${company}" open. Transaction IDs do not carry between company files — ` +
+            `switch back, or re-run the query against this file.`
+        }
       }
 
       // TxnDelType is a qbXML enum, not the label the UI shows.  The screens
@@ -159,11 +186,12 @@ export function registerQBHandlers(ipcMain: IpcMain): void {
         // writes arrive back to back with no gap.
         await new Promise((r) => setTimeout(r, 50))
       }
-      return { success: true, results }
+      return { success: true, results, company }
     } catch (err: unknown) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
-  })
+  }
+  )
 
   // Get company info
   ipcMain.handle('qb:getCompanyInfo', async () => {

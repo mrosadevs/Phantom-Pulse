@@ -7,7 +7,8 @@ import {
   CheckSquare,
   Square,
   Loader2,
-  WifiOff
+  WifiOff,
+  X
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { TRANSACTION_TYPES } from '../data/transactionTypes'
@@ -36,7 +37,11 @@ export default function DeletePage() {
   const [transactions, setTransactions] = useState<TxnRow[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showConfirm, setShowConfirm] = useState(false)
+  /** Per-row reasons from the last failed batch, so the cause is on screen. */
+  const [failures, setFailures] = useState<{ txnId: string; error: string }[]>([])
   const [hasQueried, setHasQueried] = useState(false)
+  /** The company file the listed rows came from; TxnIDs do not cross files. */
+  const [queriedCompany, setQueriedCompany] = useState<string | null>(null)
 
   const handleQuery = async () => {
     if (!txnType) { toast.error('Select a transaction type'); return }
@@ -48,7 +53,9 @@ export default function DeletePage() {
       const result = await window.api.qb.exportTransactions(txnType, { fromDate, toDate, addedSince })
       if (result.success && result.data) {
         setTransactions(result.data as TxnRow[])
+        setQueriedCompany(result.company ?? null)
         setHasQueried(true)
+        setFailures([])
         toast.success(`Found ${result.data.length} transactions`)
       } else {
         toast.error(result.error || 'Query failed')
@@ -83,7 +90,7 @@ export default function DeletePage() {
 
     const txnIds = Array.from(selected)
     try {
-      const result = await window.api.qb.deleteTransactions(txnIds, txnType)
+      const result = await window.api.qb.deleteTransactions(txnIds, txnType, queriedCompany ?? undefined)
       if (result.success && result.results) {
         const successCount = result.results.filter((r) => r.success).length
         const failCount = result.results.filter((r) => !r.success).length
@@ -104,8 +111,25 @@ export default function DeletePage() {
           mode: 'qbsdk'
         })
 
-        if (failCount === 0) toast.success(`Deleted ${successCount} transactions`)
-        else toast.error(`${failCount} failed to delete. ${successCount} deleted.`)
+        if (failCount === 0) {
+          setFailures([])
+          toast.success(`Deleted ${successCount} transactions`)
+        } else {
+          // QuickBooks says exactly why it refused, per row, and that reason
+          // used to be thrown away: "39 failed to delete" with no cause is not
+          // something anyone can act on, and the answer was sitting in the
+          // response the whole time.  Distinct reasons are what matter — a
+          // batch fails for one reason far more often than thirty-nine.
+          const failed = result.results.filter((r) => !r.success)
+          setFailures(
+            failed.map((r) => ({ txnId: r.txnId, error: r.error || 'QuickBooks gave no reason' }))
+          )
+          const reasons = Array.from(new Set(failed.map((r) => r.error || 'no reason given')))
+          toast.error(
+            `${failCount} failed to delete. ${successCount} deleted. ${reasons[0]}` +
+              (reasons.length > 1 ? ` (+${reasons.length - 1} other reason${reasons.length > 2 ? 's' : ''})` : '')
+          )
+        }
       } else {
         toast.error(result.error || 'Delete failed')
       }
@@ -276,6 +300,42 @@ export default function DeletePage() {
                 </span>
               </div>
             </div>
+
+            {/* Why the last batch failed — grouped, because a batch nearly
+                always fails for one reason rather than for each row's own. */}
+            {failures.length > 0 && (
+              <div className="mx-6 mb-3 rounded-lg border border-danger/30 bg-danger/[0.06] px-4 py-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={14} className="text-danger mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-danger">
+                      QuickBooks refused {failures.length}{' '}
+                      {failures.length === 1 ? 'deletion' : 'deletions'}
+                    </p>
+                    {Array.from(
+                      failures.reduce((m, f) => {
+                        m.set(f.error, (m.get(f.error) ?? 0) + 1)
+                        return m
+                      }, new Map<string, number>())
+                    ).map(([reason, count]) => (
+                      <p key={reason} className="text-[11px] text-text-secondary mt-1">
+                        <span className="text-danger font-mono">{count}×</span> {reason}
+                      </p>
+                    ))}
+                    <p className="text-[10px] text-text-disabled mt-1.5">
+                      &ldquo;cannot be found&rdquo; usually means the list was queried against a
+                      different company file — re-run the query, then delete.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setFailures([])}
+                    className="text-text-muted hover:text-text-primary flex-shrink-0"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Table */}
             <div className="flex-1 overflow-auto">

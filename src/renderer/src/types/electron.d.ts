@@ -334,13 +334,26 @@ declare global {
         exportTransactions: (
           type: string,
           filters: unknown
-        ) => Promise<{ success: boolean; data?: Record<string, string>[]; error?: string }>
+        ) => Promise<{
+          success: boolean
+          data?: Record<string, string>[]
+          /** The company file these rows were read from. TxnIDs are per-file. */
+          company?: string | null
+          error?: string
+        }>
+        /**
+         * @param expectedCompany the company the rows were queried from. When it
+         *   no longer matches the file QuickBooks has open, the batch is refused
+         *   rather than attempted — every TxnID would be unknown in the new file.
+         */
         deleteTransactions: (
           txnIds: string[],
-          txnType: string
+          txnType: string,
+          expectedCompany?: string
         ) => Promise<{
           success: boolean
           results?: { txnId: string; success: boolean; error?: string }[]
+          company?: string | null
           error?: string
         }>
         importGLEntities: (entities: GLImportEntity[]) => Promise<{

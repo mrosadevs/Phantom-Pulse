@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+**Fixed — a failed delete says why.** "39 failed to delete. 0 deleted." was the
+whole message, and QuickBooks had given a reason for every one of those rows
+which Pulse then threw away. The reasons are now shown, grouped — a batch fails
+for one reason far more often than it fails for thirty-nine — both in the toast
+and in a panel above the list that stays until dismissed.
+
+**Fixed — a list from one company file can no longer be deleted from another.**
+Pulse opens its session against whatever company file QuickBooks currently has
+open, and `isConnected()` is a cached flag that cannot know the file has been
+switched since. A bookkeeper moves between client files all afternoon, and
+transaction IDs do not carry between them: a list queried from one file is
+meaningless against another, so the whole batch fails at once with QuickBooks
+quite correctly reporting that it cannot find any of them. Indistinguishable,
+from the outside, from the tool being broken.
+
+The query now records which company file it read, and a delete asks the file
+who it is before writing anything. If they disagree the batch is refused and
+names both, rather than being attempted and failing row by row. If the session
+has gone entirely, that is reported as a session to reconnect rather than as
+transactions that could not be found.
+
 ## v1.3.6 — September 9, 2026
 
 **Fixed — an account-to-account transfer keeps its direction.** "Online Banking
