@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.3.8 — September 9, 2026
 
 **New — Pulse remembers what you rename.** Every payee or account corrected in
 the review screen is kept with the bank's original line beside it. That pairing
