@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.3.7 — September 9, 2026
 
 **Fixed — a failed delete says why.** "39 failed to delete. 0 deleted." was the
 whole message, and QuickBooks had given a reason for every one of those rows
