@@ -65,6 +65,21 @@ export interface ImportResult {
   row: Record<string, string>
 }
 
+export interface RenameEntry {
+  /** The bank's line, verbatim — what a cleaner rule would have to match. */
+  original: string
+  /** What the cleaner produced. */
+  from: string
+  /** What the person corrected it to. */
+  to: string
+  field: 'payee' | 'account'
+  sourceFile: string
+  /** How many times this same correction has been made. */
+  count: number
+  firstSeen: string
+  lastSeen: string
+}
+
 export interface HistoryEntry {
   id: number
   timestamp: string
@@ -547,6 +562,29 @@ declare global {
         onTemplateProgress: (
           cb: (p: { done: number; total: number; current: string }) => void
         ) => () => void
+      }
+      /**
+       * Corrections a person made to what the cleaner produced.
+       *
+       * Kept with the bank's original line beside them: the raw description is
+       * what a cleaner rule would have to match, and the correction is what it
+       * should have produced.  Repeats are what make a rule worth writing, so
+       * entries carry a count rather than being duplicated.
+       */
+      renames: {
+        getAll: () => Promise<RenameEntry[]>
+        record: (
+          entries: {
+            original: string
+            from: string
+            to: string
+            field?: 'payee' | 'account'
+            sourceFile?: string
+          }[]
+        ) => Promise<{ success: boolean; total?: number }>
+        clear: () => Promise<{ success: boolean }>
+        /** Path of the file holding them, for reading outside the app. */
+        path: () => Promise<string>
       }
       history: {
         getAll: () => Promise<HistoryEntry[]>

@@ -20,7 +20,7 @@
     "test": "npm run test:license && npm run test:analysis"
   },
   "dependencies": {
-    "@accuracy/statement-parser": "github:mrosadevs/phantom-statement-parser#v1.1.5",
+    "@accuracy/statement-parser": "github:mrosadevs/phantom-statement-parser#v1.1.6",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron-toolkit/utils": "^4.0.0",
     "@tanstack/react-table": "^8.17.3",

@@ -139,7 +139,13 @@ export function installMockApi(): void {
       getVendorAccountMap: () => ok({ data: {} }),
       getEntityAccountStats: () => ok({ data: MOCK_STATS })
     },
-    history: {
+    renames: {
+    getAll: () => Promise.resolve([]),
+    record: () => ok({ total: 0 }),
+    clear: () => ok({}),
+    path: () => Promise.resolve('(dev)')
+  },
+  history: {
       getAll: () => Promise.resolve(history),
       add: (entry: any) => {
         history = [{ ...entry, id: Date.now(), timestamp: new Date().toISOString() }, ...history]

@@ -14,6 +14,7 @@ import {
   Loader2,
   ArrowRight,
   BadgeCheck,
+  ArrowUpDown,
   Sparkles,
   AlertCircle,
   TriangleAlert,
@@ -186,6 +187,11 @@ export default function LedgerPage() {
   const [historyCoverage, setHistoryCoverage] = useState<{ scanned: number; withHistory: number } | null>(null)
   const [search, setSearch] = useState('')
   const [rowFilter, setRowFilter] = useState<'all' | 'review' | 'uncategorized' | 'duplicates'>('all')
+  // Cleaning goes faster in an order: all of one payee's rows together, or a
+  // month at a time. Default is the statement's own order, which is what the
+  // file gave us and the only order that means anything before sorting.
+  const [sortBy, setSortBy] = useState<'none' | 'date' | 'payee'>('none')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [bulkPayee, setBulkPayee] = useState('')
   const [bulkAccount, setBulkAccount] = useState('')
@@ -627,8 +633,35 @@ export default function LedgerPage() {
 
   // ── Row editing / filtering ─────────────────────────────────────────────────
 
-  const updateRow = (id: number, field: 'payee' | 'account', value: string) =>
+  /**
+   * Edit one field on one row, and remember the correction.
+   *
+   * What a person types here is the only ground truth there is about where the
+   * cleaner falls short: the bank's original line is what a rule would have to
+   * match, and the typed value is what it should have produced.  Recorded
+   * against the original description so the same line corrected the same way
+   * twice counts once, with a tally — a rule earns its place by how often the
+   * line recurs, not by how many rows one statement happened to contain.
+   */
+  const updateRow = (id: number, field: 'payee' | 'account', value: string): void => {
+    const row = rows.find((r) => r.id === id)
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)))
+    if (row && value && row[field] !== value) {
+      void window.api.renames
+        .record([
+          {
+            original: row.original,
+            from: row[field],
+            to: value,
+            field,
+            sourceFile: row.sourceFile
+          }
+        ])
+        .catch(() => {
+          /* remembering a correction must never cost someone their edit */
+        })
+    }
+  }
 
   const needsReviewCount = rows.filter((r) => r.flags.length > 0 || !r.account).length
 
@@ -646,8 +679,37 @@ export default function LedgerPage() {
           r.account.toLowerCase().includes(q)
       )
     }
+    if (sortBy !== 'none') {
+      const dir = sortDir === 'asc' ? 1 : -1
+      items = [...items].sort((a, b) => {
+        if (sortBy === 'date') {
+          // Dates are ISO here, so a string compare is a date compare.  Ties
+          // keep the statement's own order, which groups a day's rows sensibly.
+          const cmp = a.date.localeCompare(b.date)
+          return (cmp !== 0 ? cmp : a.id - b.id) * dir
+        }
+        // Case-insensitive and number-aware, so "CRD 0002" and "CRD 0010" sort
+        // the way they read.  A blank payee sorts last in either direction —
+        // it is the row still needing a name, not the first or last name.
+        if (!a.payee && !b.payee) return (a.id - b.id) * dir
+        if (!a.payee) return 1
+        if (!b.payee) return -1
+        const cmp = a.payee.localeCompare(b.payee, undefined, { sensitivity: 'base', numeric: true })
+        return (cmp !== 0 ? cmp : a.id - b.id) * dir
+      })
+    }
     return items
-  }, [rows, rowFilter, search])
+  }, [rows, rowFilter, search, sortBy, sortDir])
+
+  /** Click a heading to sort by it; click it again to flip the direction. */
+  const toggleSort = (column: 'date' | 'payee'): void => {
+    if (sortBy === column) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortBy(column)
+      setSortDir('asc')
+    }
+  }
 
   const duplicateCount = rows.filter((r) => r.duplicateOf).length
   const heldCount = rows.filter((r) => r.excluded).length
@@ -700,12 +762,31 @@ export default function LedgerPage() {
       return
     }
     const count = selectedIds.size
+    const touched = rows.filter((r) => selectedIds.has(r.id))
     setRows((prev) =>
       prev.map((r) => {
         if (!selectedIds.has(r.id)) return r
         return { ...r, payee: payee || r.payee, account: account || r.account }
       })
     )
+
+    // A bulk correction is the strongest signal of all — it says the same
+    // cleaner mistake was made across a whole group of rows at once.
+    const corrections = touched.flatMap((r) => {
+      const out: {
+        original: string
+        from: string
+        to: string
+        field: 'payee' | 'account'
+        sourceFile: string
+      }[] = []
+      if (payee && r.payee !== payee)
+        out.push({ original: r.original, from: r.payee, to: payee, field: 'payee', sourceFile: r.sourceFile })
+      if (account && r.account !== account)
+        out.push({ original: r.original, from: r.account, to: account, field: 'account', sourceFile: r.sourceFile })
+      return out
+    })
+    if (corrections.length) void window.api.renames.record(corrections).catch(() => {})
     setSelectedIds(new Set())
     setBulkPayee('')
     setBulkAccount('')
@@ -1078,8 +1159,48 @@ export default function LedgerPage() {
                           ↑
                         </th>
                       )}
-                      <th className="px-3 py-2.5 text-left font-semibold text-text-muted w-24">Date</th>
-                      <th className="px-3 py-2.5 text-left font-semibold text-text-muted">Payee</th>
+                      <th className="px-3 py-2.5 text-left font-semibold text-text-muted w-24">
+                        <button
+                          onClick={() => toggleSort('date')}
+                          className="flex items-center gap-1 hover:text-text-primary transition-colors"
+                          title="Sort by date"
+                        >
+                          Date
+                          <ArrowUpDown
+                            size={11}
+                            className={cn(
+                              'transition-colors',
+                              sortBy === 'date' ? 'text-primary' : 'text-text-disabled'
+                            )}
+                          />
+                          {sortBy === 'date' && (
+                            <span className="text-[9px] text-primary font-normal">
+                              {sortDir === 'asc' ? 'oldest' : 'newest'}
+                            </span>
+                          )}
+                        </button>
+                      </th>
+                      <th className="px-3 py-2.5 text-left font-semibold text-text-muted">
+                        <button
+                          onClick={() => toggleSort('payee')}
+                          className="flex items-center gap-1 hover:text-text-primary transition-colors"
+                          title="Sort by payee"
+                        >
+                          Payee
+                          <ArrowUpDown
+                            size={11}
+                            className={cn(
+                              'transition-colors',
+                              sortBy === 'payee' ? 'text-primary' : 'text-text-disabled'
+                            )}
+                          />
+                          {sortBy === 'payee' && (
+                            <span className="text-[9px] text-primary font-normal">
+                              {sortDir === 'asc' ? 'A→Z' : 'Z→A'}
+                            </span>
+                          )}
+                        </button>
+                      </th>
                       <th className="px-3 py-2.5 text-left font-semibold text-text-muted w-44">Account</th>
                       <th className="px-3 py-2.5 text-right font-semibold text-text-muted w-24">Amount</th>
                       <th className="px-3 py-2.5 text-left font-semibold text-text-muted w-64">Original</th>

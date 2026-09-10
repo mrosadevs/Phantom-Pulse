@@ -124,6 +124,12 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   // History/store operations
+  renames: {
+    getAll: () => ipcRenderer.invoke('renames:getAll'),
+    record: (entries: unknown[]) => ipcRenderer.invoke('renames:record', entries),
+    clear: () => ipcRenderer.invoke('renames:clear'),
+    path: () => ipcRenderer.invoke('renames:path')
+  },
   history: {
     getAll: () => ipcRenderer.invoke('history:getAll'),
     add: (entry: unknown) => ipcRenderer.invoke('history:add', entry),

@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+**New — Pulse remembers what you rename.** Every payee or account corrected in
+the review screen is kept with the bank's original line beside it. That pairing
+is the only honest record of where the cleaner falls short: the raw description
+is what a rule would have to match, and the correction is what it should have
+produced. The same line corrected the same way twice counts once and carries a
+tally, because a rule earns its place by how often the line recurs — not by how
+many rows one statement happened to contain. A bulk correction counts for every
+row it touched, which is the strongest signal there is that one cleaner mistake
+spans a whole group.
+
+Nothing about this interrupts the work: recording a correction can never cost
+you the edit, and the corrections can be reviewed in a batch later to decide
+which repeats are worth turning into cleaner rules.
+
+**New — sort the review list by date or payee.** Both headings are now
+buttons, with an arrow showing which is active and which way it runs: dates
+oldest-first or newest-first, payees A→Z or Z→A. Cleaning goes faster in an
+order — one payee's rows all together, or a month at a time — and sorting works
+with the filter, the search and select-all, so a sorted group can be corrected
+in one go. Unsorted stays the default, because the statement's own order is the
+only one that means anything before you choose otherwise.
+
+**Fixed — a partly-read account number no longer splits a batch in two.**
+Tracks the shared parser at v1.1.6. A statement does not always surrender its
+account number the same way on every page: where the label and the number are
+separate pieces of a wide header, some pages yield only the first group. One
+file then read "8981" and the next "8981 5772 0186" — the same account, twice —
+and comparing their last four digits made them "…8981" and "…0186", so twelve
+statements of one account were refused as coming from two. A number that is a
+prefix or a suffix of another is now treated as the same account, and the fuller
+reading wins. Genuinely different accounts are still reported.
+
+v1.3.6 fixed the narrower version of this, where a number was cut at the first
+space within one line. That was necessary but not sufficient — it only helped
+when the whole number reached the matcher on a single line.
+
 ## v1.3.7 — September 9, 2026
 
 **Fixed — a failed delete says why.** "39 failed to delete. 0 deleted." was the

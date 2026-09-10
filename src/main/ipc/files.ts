@@ -254,4 +254,74 @@ export function registerFileHandlers(ipcMain: IpcMain): void {
     store.set('history', [])
     return { success: true }
   })
+
+  // ── Rename ledger ─────────────────────────────────────────────────────────
+  //
+  // Every payee the cleaner got wrong and a person then corrected, kept with
+  // the bank's original line beside it.  This is the only record of where the
+  // cleaner falls short that is grounded in real statements rather than in
+  // guesses about them: the raw description is what a rule would have to match,
+  // and the correction is what it should have produced.  Reviewed in a batch,
+  // the repeats are the rules worth writing.
+  //
+  // Keyed on the original description so a description corrected the same way
+  // twice counts as one entry with a count, not two — a rule is worth writing
+  // in proportion to how often the line recurs.
+  ipcMain.handle('renames:getAll', async () => {
+    return store.get('renames', [])
+  })
+
+  ipcMain.handle(
+    'renames:record',
+    async (
+      _,
+      entries: {
+        original: string
+        from: string
+        to: string
+        field?: 'payee' | 'account'
+        sourceFile?: string
+      }[]
+    ) => {
+      const existing = store.get('renames', []) as Record<string, unknown>[]
+      const byKey = new Map(existing.map((e) => [`${e.field ?? 'payee'}|${e.original}|${e.to}`, e]))
+
+      for (const entry of entries) {
+        if (!entry.original || !entry.to || entry.from === entry.to) continue
+        const field = entry.field ?? 'payee'
+        const key = `${field}|${entry.original}|${entry.to}`
+        const prior = byKey.get(key)
+        if (prior) {
+          prior.count = ((prior.count as number) ?? 1) + 1
+          prior.lastSeen = new Date().toISOString()
+        } else {
+          byKey.set(key, {
+            original: entry.original,
+            from: entry.from,
+            to: entry.to,
+            field,
+            sourceFile: entry.sourceFile ?? '',
+            count: 1,
+            firstSeen: new Date().toISOString(),
+            lastSeen: new Date().toISOString()
+          })
+        }
+      }
+
+      // Most-repeated first: that is the order they are worth acting on.
+      const all = Array.from(byKey.values()).sort(
+        (a, b) => ((b.count as number) ?? 1) - ((a.count as number) ?? 1)
+      )
+      store.set('renames', all.slice(0, 5000))
+      return { success: true, total: all.length }
+    }
+  )
+
+  ipcMain.handle('renames:clear', async () => {
+    store.set('renames', [])
+    return { success: true }
+  })
+
+  /** Where the file lives, so the corrections can be read outside the app. */
+  ipcMain.handle('renames:path', async () => store.path)
 }
